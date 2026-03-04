@@ -1,0 +1,20 @@
+services:
+  iot-onboarding:
+    build: .
+    container_name: iot-onboarding
+    # Use host network for packet capture access
+    network_mode: host
+    # Alternative: use bridge mode with NET_RAW capability
+    # cap_add:
+    #   - NET_RAW
+    #   - NET_ADMIN
+    # ports:
+    #   - "8080:8080"
+    volumes:
+      - ./data:/data
+    environment:
+      - CAPTURE_INTERFACE=${CAPTURE_INTERFACE:-eth0}
+      - DATA_DIR=/data
+      - APP_HOST=0.0.0.0
+      - APP_PORT=${APP_PORT:-8080}
+    restart: unless-stopped
