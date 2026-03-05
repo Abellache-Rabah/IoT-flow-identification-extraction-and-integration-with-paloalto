@@ -22,15 +22,89 @@ export async function renderAllowlist(container) {
     </div>
 
     <div id="service-groups" class="stats-row" style="margin-bottom:20px;"></div>
+
+    <!-- Filter bar -->
+    <div class="card" style="margin-bottom:16px;padding:12px 16px;">
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+        <span style="color:var(--text-muted);font-size:0.85rem;white-space:nowrap;">🔍 Filter:</span>
+        <input class="form-input" id="filter-src" placeholder="Src IP" style="flex:1;min-width:120px;max-width:160px;padding:6px 10px;font-size:0.82rem;" />
+        <input class="form-input" id="filter-dst" placeholder="Dst IP" style="flex:1;min-width:120px;max-width:160px;padding:6px 10px;font-size:0.82rem;" />
+        <input class="form-input" id="filter-port" placeholder="Port" style="flex:1;min-width:80px;max-width:100px;padding:6px 10px;font-size:0.82rem;" />
+        <input class="form-input" id="filter-proto" placeholder="Proto" style="flex:1;min-width:80px;max-width:100px;padding:6px 10px;font-size:0.82rem;" />
+        <input class="form-input" id="filter-app" placeholder="App / DNS / SNI" style="flex:2;min-width:140px;max-width:220px;padding:6px 10px;font-size:0.82rem;" />
+        <select class="form-select" id="filter-status" style="flex:1;min-width:100px;max-width:130px;padding:6px 10px;font-size:0.82rem;">
+          <option value="">All Status</option>
+          <option value="allow">Allow</option>
+          <option value="deny">Deny</option>
+        </select>
+        <button class="btn btn-ghost btn-sm" id="btn-clear-filter" style="white-space:nowrap;">✕ Clear</button>
+      </div>
+      <div style="margin-top:8px;font-size:0.8rem;color:var(--text-muted);" id="filter-count"></div>
+    </div>
+
     <div id="flow-table-container"></div>
   `;
 
     let allFlows = [];
+    let activeGroupFilter = null; // set when a service-group card is clicked
+
+    // ---- filter helpers ----
+    function getFilters() {
+        return {
+            src: container.querySelector('#filter-src').value.trim().toLowerCase(),
+            dst: container.querySelector('#filter-dst').value.trim().toLowerCase(),
+            port: container.querySelector('#filter-port').value.trim(),
+            proto: container.querySelector('#filter-proto').value.trim().toLowerCase(),
+            app: container.querySelector('#filter-app').value.trim().toLowerCase(),
+            status: container.querySelector('#filter-status').value,
+        };
+    }
+
+    function applyFilters(flows) {
+        const f = getFilters();
+        return flows.filter(flow => {
+            if (f.src && !(flow.src_ip || '').toLowerCase().includes(f.src)) return false;
+            if (f.dst && !(flow.dst_ip || '').toLowerCase().includes(f.dst)) return false;
+            if (f.port && String(flow.dst_port) !== f.port) return false;
+            if (f.proto && !(flow.protocol || '').toLowerCase().includes(f.proto)) return false;
+            if (f.app) {
+                const haystack = [flow.app_protocol, flow.dns_name, flow.sni].join(' ').toLowerCase();
+                if (!haystack.includes(f.app)) return false;
+            }
+            if (f.status === 'allow' && !flow.allowed) return false;
+            if (f.status === 'deny' && flow.allowed) return false;
+            return true;
+        });
+    }
+
+    function refreshTable() {
+        let source = allFlows;
+        if (activeGroupFilter) source = allFlows.filter(f => f.service_group === activeGroupFilter);
+        const filtered = applyFilters(source);
+        const countEl = container.querySelector('#filter-count');
+        if (countEl) countEl.textContent = `Showing ${filtered.length} of ${allFlows.length} flows`;
+        renderFlowTable(filtered);
+    }
+
+    // wire filter inputs
+    ['filter-src', 'filter-dst', 'filter-port', 'filter-proto', 'filter-app', 'filter-status'].forEach(id => {
+        const el = container.querySelector(`#${id}`);
+        el.addEventListener('input', refreshTable);
+        el.addEventListener('change', refreshTable);
+    });
+    container.querySelector('#btn-clear-filter').onclick = () => {
+        ['filter-src', 'filter-dst', 'filter-port', 'filter-proto', 'filter-app'].forEach(id => {
+            container.querySelector(`#${id}`).value = '';
+        });
+        container.querySelector('#filter-status').value = '';
+        activeGroupFilter = null;
+        refreshTable();
+    };
 
     async function loadFlows() {
         try {
             allFlows = await api(`/api/devices/${device.id}/flows`);
-            renderFlowTable(allFlows);
+            refreshTable();
             await loadServiceGroups();
         } catch (err) {
             container.querySelector('#flow-table-container').innerHTML = `
@@ -53,9 +127,16 @@ export async function renderAllowlist(container) {
 
             el.querySelectorAll('.stat-card').forEach(card => {
                 card.onclick = () => {
-                    const group = card.dataset.group;
-                    const filtered = allFlows.filter(f => f.service_group === group);
-                    renderFlowTable(filtered);
+                    // toggle: clicking same group resets
+                    if (activeGroupFilter === card.dataset.group) {
+                        activeGroupFilter = null;
+                        el.querySelectorAll('.stat-card').forEach(c => c.style.outline = '');
+                    } else {
+                        activeGroupFilter = card.dataset.group;
+                        el.querySelectorAll('.stat-card').forEach(c => c.style.outline = '');
+                        card.style.outline = '2px solid var(--accent-indigo)';
+                    }
+                    refreshTable();
                 };
             });
         } catch (e) { /* ignore */ }
@@ -64,7 +145,7 @@ export async function renderAllowlist(container) {
     function renderFlowTable(flows) {
         const wrap = container.querySelector('#flow-table-container');
         if (flows.length === 0) {
-            wrap.innerHTML = '<div class="empty-state"><h3>No flows</h3></div>';
+            wrap.innerHTML = '<div class="empty-state"><h3>No flows match the current filter</h3></div>';
             return;
         }
 
@@ -88,7 +169,7 @@ export async function renderAllowlist(container) {
           <table class="data-table">
             <thead><tr>
               <th style="width:40px;"><input type="checkbox" class="group-check" data-group="${group}" /></th>
-              <th>Source</th><th>Destination</th><th>Port</th><th>Proto</th><th>App</th><th>DNS/SNI</th><th>Data</th><th>Conns</th><th>Status</th><th>Notes</th>
+              <th>Source</th><th>Destination</th><th>Port</th><th>Proto</th><th>App</th><th>DNS/SNI</th><th>Data</th><th>Conns</th><th>Status</th><th>Notes</th><th style="width:36px;"></th>
             </tr></thead>
             <tbody>
               ${gFlows.map(f => `
@@ -104,6 +185,7 @@ export async function renderAllowlist(container) {
                   <td>${f.connection_count}</td>
                   <td><span class="${f.allowed ? 'status-badge status-reviewed' : 'status-badge status-new'}">${f.allowed ? 'ALLOW' : 'DENY'}</span></td>
                   <td><input class="form-input flow-notes" data-id="${f.id}" value="${f.notes || ''}" style="width:120px;padding:4px 8px;font-size:0.78rem;" placeholder="Notes..." /></td>
+                  <td><button class="btn btn-ghost btn-sm flow-delete-btn" data-id="${f.id}" title="Remove this entry" style="color:var(--accent-red);padding:4px 6px;">🗑️</button></td>
                 </tr>
               `).join('')}
             </tbody>
@@ -126,10 +208,29 @@ export async function renderAllowlist(container) {
                     if (cb.checked) {
                         badge.className = 'status-badge status-reviewed';
                         badge.textContent = 'ALLOW';
+                        row.classList.remove('denied');
                     } else {
                         badge.className = 'status-badge status-new';
                         badge.textContent = 'DENY';
+                        row.classList.add('denied');
                     }
+                    // sync allFlows state
+                    const fl = allFlows.find(f => f.id === cb.dataset.id);
+                    if (fl) fl.allowed = cb.checked ? 1 : 0;
+                } catch (err) { toast(err.message, 'error'); }
+            };
+        });
+
+        // Delete buttons
+        wrap.querySelectorAll('.flow-delete-btn').forEach(btn => {
+            btn.onclick = async () => {
+                if (!confirm('Remove this flow entry?')) return;
+                try {
+                    await api(`/api/devices/${device.id}/flows/${btn.dataset.id}`, { method: 'DELETE' });
+                    allFlows = allFlows.filter(f => f.id !== btn.dataset.id);
+                    toast('Flow entry removed', 'success');
+                    refreshTable();
+                    await loadServiceGroups();
                 } catch (err) { toast(err.message, 'error'); }
             };
         });
@@ -142,6 +243,8 @@ export async function renderAllowlist(container) {
                         method: 'PATCH',
                         body: { notes: input.value },
                     });
+                    const fl = allFlows.find(f => f.id === input.dataset.id);
+                    if (fl) fl.notes = input.value;
                 } catch (e) { /* ignore */ }
             };
         });
@@ -151,7 +254,6 @@ export async function renderAllowlist(container) {
             gc.onchange = () => {
                 const group = gc.dataset.group;
                 wrap.querySelectorAll(`.flow-check`).forEach(fc => {
-                    const row = fc.closest('tr');
                     const table = fc.closest('.table-container');
                     const header = table.previousElementSibling;
                     if (header && header.querySelector(`[data-group="${group}"]`)) {
@@ -172,8 +274,13 @@ export async function renderAllowlist(container) {
                         method: 'POST',
                         body: { flow_ids: ids, allowed: true },
                     });
+                    ids.forEach(id => {
+                        const fl = allFlows.find(f => f.id === id);
+                        if (fl) fl.allowed = 1;
+                    });
                     toast(`Allowed ${ids.length} ${group} flows`, 'success');
-                    await loadFlows();
+                    refreshTable();
+                    await loadServiceGroups();
                 } catch (err) { toast(err.message, 'error'); }
             };
         });
@@ -188,8 +295,10 @@ export async function renderAllowlist(container) {
                 method: 'POST',
                 body: { flow_ids: ids, allowed: true },
             });
+            allFlows.forEach(f => f.allowed = 1);
             toast('All flows allowed', 'success');
-            await loadFlows();
+            refreshTable();
+            await loadServiceGroups();
         } catch (err) { toast(err.message, 'error'); }
     };
 
@@ -201,8 +310,10 @@ export async function renderAllowlist(container) {
                 method: 'POST',
                 body: { flow_ids: ids, allowed: false },
             });
+            allFlows.forEach(f => f.allowed = 0);
             toast('All flows denied', 'success');
-            await loadFlows();
+            refreshTable();
+            await loadServiceGroups();
         } catch (err) { toast(err.message, 'error'); }
     };
 

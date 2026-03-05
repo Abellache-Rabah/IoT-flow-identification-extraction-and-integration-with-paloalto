@@ -158,6 +158,21 @@ async def bulk_update_flows(device_id: str, data: BulkFlowUpdate):
     return {"updated": len(data.flow_ids)}
 
 
+@router.delete("/devices/{device_id}/flows/{flow_id}")
+async def delete_flow(device_id: str, flow_id: str):
+    """Delete a single flow entry."""
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT id FROM flows WHERE id = ? AND device_id = ?", (flow_id, device_id)
+    )
+    row = await cursor.fetchone()
+    if not row:
+        raise HTTPException(404, "Flow not found")
+    await db.execute("DELETE FROM flows WHERE id = ? AND device_id = ?", (flow_id, device_id))
+    await db.commit()
+    return {"deleted": flow_id}
+
+
 @router.delete("/devices/{device_id}/flows")
 async def clear_all_flows(device_id: str):
     """Delete ALL flows for a device (reset)."""
