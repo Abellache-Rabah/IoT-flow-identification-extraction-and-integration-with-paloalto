@@ -81,6 +81,10 @@ export async function renderPanos(container) {
           <label class="form-label">Rule Name</label>
           <input class="form-input pa-persist" id="rule-name" data-key="ruleName" placeholder="e.g. IoT-camera-allow" value="${p.ruleName}" />
         </div>
+        <div class="form-group">
+          <label class="form-label">Description <span style="color:var(--text-muted);font-weight:normal;">(optional)</span></label>
+          <input class="form-input pa-persist" id="rule-description" data-key="ruleDescription" placeholder="Describe the purpose of this rule..." value="${p.ruleDescription}" />
+        </div>
         <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
           <div class="form-group">
             <label class="form-label">From Zone</label>
@@ -181,7 +185,7 @@ export async function renderPanos(container) {
           <button class="btn btn-primary" id="btn-pan-preview">Preview Request</button>
           <button class="btn btn-success" id="btn-pan-push">1. Push Post-Rule</button>
           <button class="btn btn-secondary" id="btn-pan-commit">2. Commit to Panorama</button>
-          <button class="btn btn-secondary" id="btn-pan-push-dg">3. Push to Device Group</button>
+          <button class="btn btn-secondary" id="btn-pan-push-dg" disabled title="Push to Device Group is not available — use Panorama UI after commit" style="opacity:0.45;cursor:not-allowed;">3. Push to Device Group</button>
         </div>
         <div id="pan-preview" style="display:none;"></div>
       </div>
@@ -238,21 +242,27 @@ export async function renderPanos(container) {
 
   function getRuleBody() {
     const name = container.querySelector('#rule-name').value.trim();
-    return {
-      entry: [{
-        '@name': name,
-        from: { member: splitField('#rule-from') },
-        to: { member: splitField('#rule-to') },
-        source: { member: splitField('#rule-source') },
-        destination: { member: splitField('#rule-dest') },
-        service: { member: splitField('#rule-service') },
-        application: { member: splitField('#rule-app') },
-        action: container.querySelector('#rule-action').value,
-        'log-start': container.querySelector('#rule-log-start').checked ? 'yes' : 'no',
-        'log-end': container.querySelector('#rule-log-end').checked ? 'yes' : 'no',
-        tag: { member: splitField('#rule-tags') },
-      }],
+    const rawDesc = container.querySelector('#rule-description').value.trim();
+    // Read username from the keygen-user field (whoever tried to generate the API key)
+    const username = container.querySelector('#keygen-user').value.trim() || 'unknown';
+    const description = rawDesc ? `${rawDesc} — ${username}` : `Created by ${username}`;
+    const tagsVal = container.querySelector('#rule-tags').value.trim();
+    const tagMembers = tagsVal ? tagsVal.split(',').map(s => s.trim()).filter(Boolean) : [];
+    const entry = {
+      '@name': name,
+      description,
+      from: { member: splitField('#rule-from') },
+      to: { member: splitField('#rule-to') },
+      source: { member: splitField('#rule-source') },
+      destination: { member: splitField('#rule-dest') },
+      service: { member: splitField('#rule-service') },
+      application: { member: splitField('#rule-app') },
+      action: container.querySelector('#rule-action').value,
+      'log-start': container.querySelector('#rule-log-start').checked ? 'yes' : 'no',
+      'log-end': container.querySelector('#rule-log-end').checked ? 'yes' : 'no',
     };
+    if (tagMembers.length > 0) entry.tag = { member: tagMembers };
+    return { entry: [entry] };
   }
 
   function getPostRuleBody() {
@@ -409,6 +419,25 @@ export async function renderPanos(container) {
         }
       });
       showResponse(result.body, result.success);
+
+      // If push succeeded, move rule before DENY-ANY-ANY
+      if (result.success) {
+        try {
+          await api('/api/panos/proxy', {
+            method: 'POST', body: {
+              http_method: 'POST',
+              url: `https://${c.host}/restapi/v${c.version}/Policies/SecurityRules:move`,
+              params: { name, location: 'vsys', vsys, where: 'before', dst: 'DENY-ANY-ANY' },
+              headers: { 'X-PAN-KEY': c.key, 'Content-Type': 'application/json', Accept: 'application/json' },
+              json_body: null,
+            }
+          });
+          toast('Rule moved above DENY-ANY-ANY', 'success');
+        } catch (_) {
+          // DENY-ANY-ANY may not exist — silently ignore
+          toast('Rule pushed (could not move above DENY-ANY-ANY — rule may not exist)', 'info');
+        }
+      }
     } catch (err) { toast(err.message, 'error'); }
   };
 
@@ -479,6 +508,25 @@ export async function renderPanos(container) {
         }
       });
       showResponse(result.body, result.success);
+
+      // If push succeeded, move the rule before DENY-ANY-ANY
+      if (result.success) {
+        try {
+          await api('/api/panos/proxy', {
+            method: 'POST', body: {
+              http_method: 'POST',
+              url: `https://${c.host}/restapi/v${c.version}/Policies/SecurityPostRules:move`,
+              params: { name, location: 'device-group', 'device-group': dg, where: 'before', dst: 'DENY-ANY-ANY' },
+              headers: { 'X-PAN-KEY': c.key, 'Content-Type': 'application/json', Accept: 'application/json' },
+              json_body: null,
+            }
+          });
+          toast('Rule moved above DENY-ANY-ANY', 'success');
+        } catch (_) {
+          // DENY-ANY-ANY may not exist — silently ignore
+          toast('Rule pushed (could not move above DENY-ANY-ANY — rule may not exist)', 'info');
+        }
+      }
     } catch (err) { toast(err.message, 'error'); }
   };
 

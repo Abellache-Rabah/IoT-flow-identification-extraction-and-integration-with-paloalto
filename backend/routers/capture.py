@@ -1,3 +1,4 @@
+import os
 import uuid
 import asyncio
 import json
@@ -13,6 +14,25 @@ from services.capture_service import (
 from config import PROFILES_DIR, CAPTURE_INTERFACE
 
 router = APIRouter(prefix="/api", tags=["capture"])
+
+
+@router.get("/capture/interfaces")
+async def list_interfaces():
+    """List available network interfaces on the host."""
+    interfaces = []
+    try:
+        # Read from /proc/net/dev — always available on Linux
+        with open("/proc/net/dev") as f:
+            for line in f.readlines()[2:]:  # Skip header lines
+                name = line.split(":")[0].strip()
+                if name and name != "lo":
+                    interfaces.append(name)
+    except Exception:
+        pass
+    # Fallback: also try 'any' pseudo-interface
+    if "any" not in interfaces:
+        interfaces = ["any"] + interfaces
+    return {"interfaces": interfaces}
 
 
 @router.post("/devices/{device_id}/captures", response_model=CaptureOut, status_code=201)
@@ -36,8 +56,8 @@ async def create_capture(device_id: str, config: CaptureConfig):
     pcap_path = str(profile_dir / f"capture_{capture_id}.pcap")
 
     bpf_filter = config.bpf_filter
-    if not bpf_filter and dict(device).get("mac_address"):
-        bpf_filter = f"ether host {dict(device)['mac_address']}"
+    if not bpf_filter and dict(device).get("ip_address"):
+        bpf_filter = f"host {dict(device)['ip_address']}"
 
     await db.execute(
         """INSERT INTO captures (id, device_id, pcap_path, interface, bpf_filter, duration_seconds, packet_count, file_size, started_at, completed_at)
@@ -141,6 +161,30 @@ async def stop_device_capture(device_id: str, capture_id: str):
     await db.commit()
 
     return {"status": "stopped", "packet_count": status["packet_count"], "file_size": status["file_size"]}
+
+
+@router.delete("/devices/{device_id}/captures/{capture_id}", status_code=204)
+async def delete_capture(device_id: str, capture_id: str):
+    """Delete a capture record and its associated PCAP file from disk."""
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT * FROM captures WHERE id = ? AND device_id = ?",
+        (capture_id, device_id),
+    )
+    row = await cursor.fetchone()
+    if not row:
+        raise HTTPException(404, "Capture not found")
+
+    capture = dict(row)
+    pcap_path = capture.get("pcap_path", "")
+    if pcap_path and os.path.exists(pcap_path):
+        try:
+            os.remove(pcap_path)
+        except OSError:
+            pass
+
+    await db.execute("DELETE FROM captures WHERE id = ?", (capture_id,))
+    await db.commit()
 
 
 @router.get("/devices/{device_id}/capture-status")

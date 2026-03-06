@@ -1,5 +1,6 @@
 import asyncio
 import os
+import shlex
 import signal
 from datetime import datetime, timezone
 from pathlib import Path
@@ -8,6 +9,39 @@ from config import TCPDUMP_BIN, CAPTURE_INTERFACE
 
 # Active captures: device_id -> capture state dict
 _active_captures: dict[str, dict] = {}
+
+
+def _count_pcap_packets(pcap_path: str) -> int | None:
+    """Count packets in a PCAP file by parsing the binary structure.
+    PCAP global header = 24 bytes; each record header = 16 bytes (ts_sec, ts_usec, incl_len, orig_len).
+    Returns packet count, or None if file is unreadable/incomplete.
+    """
+    import struct
+    GLOBAL_HEADER = 24
+    REC_HEADER = 16
+    try:
+        with open(pcap_path, "rb") as f:
+            header = f.read(GLOBAL_HEADER)
+            if len(header) < GLOBAL_HEADER:
+                return None
+            magic = struct.unpack_from("<I", header)[0]
+            if magic == 0xa1b2c3d4:
+                byte_order = "<"
+            elif magic == 0xd4c3b2a1:
+                byte_order = ">"
+            else:
+                return None  # not a pcap file
+            count = 0
+            while True:
+                rec = f.read(REC_HEADER)
+                if len(rec) < REC_HEADER:
+                    break
+                incl_len = struct.unpack_from(f"{byte_order}I", rec, 8)[0]
+                f.seek(incl_len, 1)  # skip packet data
+                count += 1
+        return count
+    except Exception:
+        return None
 
 
 def _get_capture_state(device_id: str) -> dict | None:
@@ -35,7 +69,7 @@ async def start_capture_background(
     ]
 
     if bpf_filter:
-        cmd.extend(bpf_filter.split())
+        cmd.extend(shlex.split(bpf_filter))
 
     process = await asyncio.create_subprocess_exec(
         *cmd,
@@ -85,6 +119,21 @@ async def start_capture_background(
     if duration_seconds > 0:
         asyncio.create_task(_auto_stop())
 
+    # Periodically update file size + packet count from the PCAP binary
+    async def _update_stats():
+        while state["running"]:
+            await asyncio.sleep(2)
+            if os.path.exists(pcap_path):
+                try:
+                    state["file_size"] = os.path.getsize(pcap_path)
+                    count = _count_pcap_packets(pcap_path)
+                    if count is not None:
+                        state["packet_count"] = count
+                except Exception:
+                    pass
+
+    asyncio.create_task(_update_stats())
+
     # Wait for process to finish in background
     async def _wait():
         await process.wait()
@@ -92,6 +141,9 @@ async def start_capture_background(
         state["completed_at"] = datetime.now(timezone.utc).isoformat()
         if os.path.exists(pcap_path):
             state["file_size"] = os.path.getsize(pcap_path)
+            count = _count_pcap_packets(pcap_path)
+            if count is not None:
+                state["packet_count"] = count
 
     asyncio.create_task(_wait())
 

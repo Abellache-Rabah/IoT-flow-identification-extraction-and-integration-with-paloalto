@@ -10,6 +10,7 @@ export const state = {
         ruleName: '', ruleFrom: '', ruleTo: '',
         ruleSource: '', ruleDest: '', ruleService: '',
         ruleApp: '', ruleTags: 'iot', ruleAction: 'allow',
+        ruleDescription: '', ruleUsername: '',
         logStart: true, logEnd: true,
         fwVsys: '', panDg: '', panVsys: '',
     }

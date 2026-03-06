@@ -17,6 +17,7 @@ export async function renderAllowlist(container) {
       <div style="display:flex;gap:10px;">
         <button class="btn btn-secondary btn-sm" id="btn-allow-all">✓ Allow All</button>
         <button class="btn btn-secondary btn-sm" id="btn-deny-all">✗ Deny All</button>
+        <button class="btn btn-danger btn-sm" id="btn-clear-list" title="Delete all flows from the list">🗑️ Clear Allow List</button>
         <button class="btn btn-success" id="btn-generate-rules">Generate Rules →</button>
       </div>
     </div>
@@ -312,6 +313,17 @@ export async function renderAllowlist(container) {
             });
             allFlows.forEach(f => f.allowed = 0);
             toast('All flows denied', 'success');
+            refreshTable();
+            await loadServiceGroups();
+        } catch (err) { toast(err.message, 'error'); }
+    };
+
+    container.querySelector('#btn-clear-list').onclick = async () => {
+        if (!confirm('Delete ALL flows from the allow list? This cannot be undone.')) return;
+        try {
+            await api(`/api/devices/${device.id}/flows`, { method: 'DELETE' });
+            allFlows = [];
+            toast('All flows cleared', 'success');
             refreshTable();
             await loadServiceGroups();
         } catch (err) { toast(err.message, 'error'); }

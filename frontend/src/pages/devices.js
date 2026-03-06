@@ -2,26 +2,26 @@
 import { api, toast, navigate, setActiveDevice, timeAgo } from '../main.js';
 
 function statusClass(status) {
-    return `status-badge status-${status}`;
+  return `status-badge status-${status}`;
 }
 
 function statusLabel(status) {
-    const map = {
-        new: '● New',
-        capturing: '◉ Capturing',
-        captured: '◉ Captured',
-        analyzed: '◈ Analyzed',
-        flows_extracted: '◈ Flows Ready',
-        reviewed: '✓ Reviewed',
-        rules_generated: '✓ Rules Ready',
-    };
-    return map[status] || status;
+  const map = {
+    new: '● New',
+    capturing: '◉ Capturing',
+    captured: '◉ Captured',
+    analyzed: '◈ Analyzed',
+    flows_extracted: '◈ Flows Ready',
+    reviewed: '✓ Reviewed',
+    rules_generated: '✓ Rules Ready',
+  };
+  return map[status] || status;
 }
 
 function renderNewDeviceModal(container, onCreated) {
-    const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay';
-    overlay.innerHTML = `
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
     <div class="modal-content">
       <h2 class="modal-title">New Device Profile</h2>
       <div class="form-group">
@@ -72,38 +72,38 @@ function renderNewDeviceModal(container, onCreated) {
     </div>
   `;
 
-    document.getElementById('modal-root').appendChild(overlay);
+  document.getElementById('modal-root').appendChild(overlay);
 
-    overlay.querySelector('#md-cancel').onclick = () => overlay.remove();
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  overlay.querySelector('#md-cancel').onclick = () => overlay.remove();
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
 
-    overlay.querySelector('#md-submit').onclick = async () => {
-        const name = overlay.querySelector('#md-name').value.trim();
-        if (!name) { toast('Device name is required', 'error'); return; }
+  overlay.querySelector('#md-submit').onclick = async () => {
+    const name = overlay.querySelector('#md-name').value.trim();
+    if (!name) { toast('Device name is required', 'error'); return; }
 
-        try {
-            const device = await api('/api/devices', {
-                method: 'POST',
-                body: {
-                    name,
-                    device_type: overlay.querySelector('#md-type').value,
-                    vendor: overlay.querySelector('#md-vendor').value.trim(),
-                    mac_address: overlay.querySelector('#md-mac').value.trim(),
-                    ip_address: overlay.querySelector('#md-ip').value.trim(),
-                    description: overlay.querySelector('#md-desc').value.trim(),
-                },
-            });
-            overlay.remove();
-            toast('Device profile created!', 'success');
-            onCreated(device);
-        } catch (err) {
-            toast(err.message, 'error');
-        }
-    };
+    try {
+      const device = await api('/api/devices', {
+        method: 'POST',
+        body: {
+          name,
+          device_type: overlay.querySelector('#md-type').value,
+          vendor: overlay.querySelector('#md-vendor').value.trim(),
+          mac_address: overlay.querySelector('#md-mac').value.trim(),
+          ip_address: overlay.querySelector('#md-ip').value.trim(),
+          description: overlay.querySelector('#md-desc').value.trim(),
+        },
+      });
+      overlay.remove();
+      toast('Device profile created!', 'success');
+      onCreated(device);
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  };
 }
 
 export async function renderDevices(container) {
-    container.innerHTML = `
+  container.innerHTML = `
     <div class="page-header" style="display:flex;justify-content:space-between;align-items:flex-start;">
       <div>
         <h1 class="page-title">Device Profiles</h1>
@@ -118,44 +118,44 @@ export async function renderDevices(container) {
     <div id="device-list"></div>
   `;
 
-    const listEl = container.querySelector('#device-list');
-    const statsEl = container.querySelector('#device-stats');
+  const listEl = container.querySelector('#device-list');
+  const statsEl = container.querySelector('#device-stats');
 
-    async function loadDevices() {
-        try {
-            const devices = await api('/api/devices');
+  async function loadDevices() {
+    try {
+      const devices = await api('/api/devices');
 
-            if (devices.length > 0) {
-                const total = devices.length;
-                const rulesReady = devices.filter(d => d.status === 'rules_generated').length;
-                const inProgress = devices.filter(d => !['new', 'rules_generated'].includes(d.status)).length;
+      if (devices.length > 0) {
+        const total = devices.length;
+        const rulesReady = devices.filter(d => d.status === 'rules_generated').length;
+        const inProgress = devices.filter(d => !['new', 'rules_generated'].includes(d.status)).length;
 
-                statsEl.style.display = 'grid';
-                statsEl.innerHTML = `
+        statsEl.style.display = 'grid';
+        statsEl.innerHTML = `
           <div class="stat-card"><div class="stat-value">${total}</div><div class="stat-label">Total Devices</div></div>
           <div class="stat-card"><div class="stat-value">${rulesReady}</div><div class="stat-label">Rules Generated</div></div>
           <div class="stat-card"><div class="stat-value">${inProgress}</div><div class="stat-label">In Progress</div></div>
         `;
-            }
+      }
 
-            if (devices.length === 0) {
-                listEl.innerHTML = `
+      if (devices.length === 0) {
+        listEl.innerHTML = `
           <div class="empty-state">
             <svg width="64" height="64" viewBox="0 0 64 64" fill="none"><rect x="8" y="12" width="48" height="40" rx="4" stroke="currentColor" stroke-width="2"/><circle cx="32" cy="32" r="8" stroke="currentColor" stroke-width="2"/><path d="M32 24v-8M32 48v-8M24 32h-8M48 32h-8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
             <h3>No devices yet</h3>
             <p>Start by creating a new device profile to begin the onboarding process.</p>
           </div>
         `;
-                return;
-            }
+        return;
+      }
 
-            listEl.innerHTML = '<div class="device-grid"></div>';
-            const grid = listEl.querySelector('.device-grid');
+      listEl.innerHTML = '<div class="device-grid"></div>';
+      const grid = listEl.querySelector('.device-grid');
 
-            devices.forEach(d => {
-                const card = document.createElement('div');
-                card.className = 'device-card';
-                card.innerHTML = `
+      devices.forEach(d => {
+        const card = document.createElement('div');
+        card.className = 'device-card';
+        card.innerHTML = `
           <div class="device-card-name">${d.name}</div>
           <div class="device-card-meta">
             ${d.device_type ? `<span><strong>Type:</strong> ${d.device_type}</span>` : ''}
@@ -166,25 +166,38 @@ export async function renderDevices(container) {
           <div class="device-card-footer">
             <span class="${statusClass(d.status)}">${statusLabel(d.status)}</span>
             <span style="font-size:0.78rem;color:var(--text-muted)">${timeAgo(d.updated_at)}</span>
+            <button class="btn btn-ghost btn-sm remove-device-btn" data-id="${d.id}" title="Remove device" style="color:var(--accent-red);margin-left:auto;padding:2px 8px;">🗑️</button>
           </div>
         `;
-                card.onclick = () => {
-                    setActiveDevice(d);
-                    navigate('/capture');
-                };
-                grid.appendChild(card);
-            });
-        } catch (err) {
-            listEl.innerHTML = `<div class="empty-state"><h3>Cannot connect to backend</h3><p>${err.message}</p></div>`;
-        }
+        card.onclick = (e) => {
+          if (e.target.closest('.remove-device-btn')) return;
+          setActiveDevice(d);
+          navigate('/capture');
+        };
+        card.querySelector('.remove-device-btn').onclick = async (e) => {
+          e.stopPropagation();
+          if (!confirm(`Remove device "${d.name}"? This will also delete all its captures and flow data.`)) return;
+          try {
+            await api(`/api/devices/${d.id}`, { method: 'DELETE' });
+            toast(`Device "${d.name}" removed`, 'success');
+            await loadDevices();
+          } catch (err) {
+            toast(err.message, 'error');
+          }
+        };
+        grid.appendChild(card);
+      });
+    } catch (err) {
+      listEl.innerHTML = `<div class="empty-state"><h3>Cannot connect to backend</h3><p>${err.message}</p></div>`;
     }
+  }
 
-    container.querySelector('#btn-new-device').onclick = () => {
-        renderNewDeviceModal(container, (device) => {
-            setActiveDevice(device);
-            navigate('/capture');
-        });
-    };
+  container.querySelector('#btn-new-device').onclick = () => {
+    renderNewDeviceModal(container, (device) => {
+      setActiveDevice(device);
+      navigate('/capture');
+    });
+  };
 
-    await loadDevices();
+  await loadDevices();
 }
