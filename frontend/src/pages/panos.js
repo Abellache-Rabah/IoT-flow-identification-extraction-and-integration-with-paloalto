@@ -177,8 +177,12 @@ export async function renderPanos(container) {
             <input class="form-input pa-persist" id="pan-dg" data-key="panDg" placeholder="e.g. MY-DEVICE-GROUP" value="${p.panDg}" />
           </div>
           <div class="form-group">
-            <label class="form-label">VSYS <span style="color:var(--text-muted);font-weight:normal;">(for partial commit)</span></label>
-            <input class="form-input pa-persist" id="pan-vsys" data-key="panVsys" placeholder="e.g. vsys1" value="${p.panVsys}" />
+            <label class="form-label">Target Devices <span style="color:var(--text-muted);font-weight:normal;">(comma-sep serials/names, optional)</span></label>
+            <input class="form-input pa-persist" id="pan-target" data-key="panTarget" placeholder="e.g. FW-01, FW-02" value="${p.panTarget || ''}" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Target VSYS <span style="color:var(--text-muted);font-weight:normal;">(comma-sep, optional)</span></label>
+            <input class="form-input pa-persist" id="pan-target-vsys" data-key="panTargetVsys" placeholder="e.g. vsys1, vsys2" value="${p.panTargetVsys || ''}" />
           </div>
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px;">
@@ -267,7 +271,35 @@ export async function renderPanos(container) {
 
   function getPostRuleBody() {
     const body = getRuleBody();
-    return { entry: body.entry[0] };
+    const entry = body.entry[0];
+
+    // Add target devices for Panorama if specified
+    if (container.querySelector('#pan-target')) {
+      const targetStr = container.querySelector('#pan-target').value.trim();
+      const vsysStr = container.querySelector('#pan-target-vsys')?.value?.trim();
+      const vsysList = vsysStr ? vsysStr.split(',').map(s => s.trim()).filter(Boolean) : [];
+
+      if (targetStr) {
+        const targetDevices = targetStr.split(',').map(s => s.trim()).filter(Boolean);
+        const deviceEntries = targetDevices.map(name => {
+          const d = { '@name': name };
+          if (vsysList.length > 0) {
+            d.vsys = { entry: vsysList.map(v => ({ '@name': v })) };
+          }
+          return d;
+        });
+
+        if (deviceEntries.length > 0) {
+          entry.target = {
+            devices: {
+              entry: deviceEntries
+            }
+          };
+        }
+      }
+    }
+
+    return { entry };
   }
 
   function validate(fields) {
@@ -368,7 +400,20 @@ export async function renderPanos(container) {
   // ===== LOAD FROM ALLOWED FLOWS =====
   container.querySelector('#btn-load-from-flows').onclick = async () => {
     try {
-      const result = await api(`/api/devices/${device.id}/panos/rules-from-flows`, { method: 'POST', body: {} });
+      const targetStr = container.querySelector('#pan-target')?.value?.trim();
+      const vsysStr = container.querySelector('#pan-target-vsys')?.value?.trim();
+      const vsysList = vsysStr ? vsysStr.split(',').map(s => s.trim()).filter(Boolean) : [];
+
+      const targetDevices = targetStr ? targetStr.split(',').map(s => {
+        const d = { name: s.trim() };
+        if (vsysList.length > 0) d.vsys = vsysList;
+        return d;
+      }).filter(d => d.name) : [];
+
+      const result = await api(`/api/devices/${device.id}/panos/rules-from-flows`, {
+        method: 'POST',
+        body: { variables: { target_devices: targetDevices } }
+      });
       if (result.entry) {
         const e = result.entry;
         setField('#rule-name', e['@name'] || '');
@@ -377,6 +422,21 @@ export async function renderPanos(container) {
         setField('#rule-service', (e.service?.member || []).join(', '));
         setField('#rule-app', (e.application?.member || []).join(', '));
         setField('#rule-tags', (e.tag?.member || []).join(', '));
+
+        // Populate target devices back if there are any returned in the entry
+        if (e.target?.devices?.entry) {
+          const targets = e.target.devices.entry.map(d => d['@name']).join(', ');
+          if (container.querySelector('#pan-target')) {
+            setField('#pan-target', targets);
+          }
+
+          const firstTargetWithVsys = e.target.devices.entry.find(d => d.vsys && d.vsys.entry && d.vsys.entry.length > 0);
+          if (firstTargetWithVsys && container.querySelector('#pan-target-vsys')) {
+            const vsys = firstTargetWithVsys.vsys.entry.map(v => v['@name']).join(', ');
+            setField('#pan-target-vsys', vsys);
+          }
+        }
+
         const stats = result.stats || {};
         toast(`Loaded: ${stats.allowed_flows || 0} flows → ${stats.unique_destinations || 0} destinations, ${stats.unique_services || 0} services`, 'success');
       }
@@ -532,16 +592,14 @@ export async function renderPanos(container) {
 
   container.querySelector('#btn-pan-commit').onclick = async () => {
     const c = getConn();
-    const panVsys = container.querySelector('#pan-vsys').value.trim();
     if (!validate([['Host', c.host], ['Version', c.version], ['API Key', c.key]])) return;
 
     const commitBody = {
       entry: {
-        partial: panVsys ? {
-          vsys: { member: [panVsys] },
+        partial: {
           'device-and-network': 'excluded',
           'shared-object': 'excluded',
-        } : {},
+        },
       },
     };
 

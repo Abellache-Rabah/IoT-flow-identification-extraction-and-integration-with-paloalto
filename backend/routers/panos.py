@@ -102,8 +102,9 @@ async def rules_from_flows(device_id: str, data: RulesFromFlowsRequest):
         elif f.get("service_group"):
             services.add(f["service_group"])
 
+    from typing import Any
     # Build a single rule entry
-    entry = {
+    entry: dict[str, Any] = {
         "@name": f"{device_name}-allow",
         "from": {"member": []},
         "to": {"member": []},
@@ -116,6 +117,23 @@ async def rules_from_flows(device_id: str, data: RulesFromFlowsRequest):
         "log-end": "yes",
         "tag": {"member": ["iot"]},
     }
+
+    target_devices = data.variables.get("target_devices", [])
+    if target_devices:
+        device_entries = []
+        for dev in target_devices:
+            dev_entry = {"@name": dev.get("name", "")}
+            vsys = dev.get("vsys", [])
+            if vsys:
+                dev_entry["vsys"] = {"entry": [{"@name": v} for v in vsys]}
+            device_entries.append(dev_entry)
+        
+        if device_entries:
+            entry["target"] = {
+                "devices": {
+                    "entry": device_entries
+                }
+            }
 
     return {
         "entry": entry,

@@ -23,7 +23,8 @@ async def list_interfaces():
     try:
         # Read from /proc/net/dev — always available on Linux
         with open("/proc/net/dev") as f:
-            for line in f.readlines()[2:]:  # Skip header lines
+            lines = f.readlines()
+            for line in lines[2:]:  # Skip header lines
                 name = line.split(":")[0].strip()
                 if name and name != "lo":
                     interfaces.append(name)
