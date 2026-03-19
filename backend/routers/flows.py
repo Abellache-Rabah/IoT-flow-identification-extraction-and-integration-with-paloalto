@@ -5,6 +5,7 @@ from database import get_db
 from models import FlowOut, FlowUpdate, BulkFlowUpdate
 from config import PROFILES_DIR
 from services.flow_service import extract_flows
+from services.flow_persist import merge_flows_into_db
 
 router = APIRouter(prefix="/api", tags=["flows"])
 
@@ -22,63 +23,10 @@ async def extract_device_flows(device_id: str, capture_id: str):
     output_dir = str(PROFILES_DIR / device_id / f"zeek_{capture_id}")
     device_ip = dict(device).get("ip_address", "")
     flows = extract_flows(output_dir, device_ip)
-
-    # Load existing flows for this device to deduplicate
-    cursor = await db.execute(
-        "SELECT id, src_ip, dst_ip, dst_port, protocol, bytes_total, packets_total, connection_count FROM flows WHERE device_id = ?",
-        (device_id,),
-    )
-    existing_rows = await cursor.fetchall()
-    existing_map = {}
-    for r in existing_rows:
-        row = dict(r)
-        key = (row["src_ip"], row["dst_ip"], row["dst_port"], row["protocol"])
-        existing_map[key] = row
-
-    inserted = 0
-    updated = 0
-    for f in flows:
-        key = (f["src_ip"], f["dst_ip"], f["dst_port"], f["protocol"])
-        if key in existing_map:
-            # Merge: update counters on existing row
-            ex = existing_map[key]
-            await db.execute(
-                """UPDATE flows SET bytes_total = bytes_total + ?, packets_total = packets_total + ?,
-                   connection_count = connection_count + ?, capture_id = ?,
-                   app_protocol = CASE WHEN app_protocol = '' THEN ? ELSE app_protocol END,
-                   dns_name = CASE WHEN dns_name = '' THEN ? ELSE dns_name END,
-                   sni = CASE WHEN sni = '' THEN ? ELSE sni END
-                   WHERE id = ?""",
-                (f["bytes_total"], f["packets_total"], f["connection_count"],
-                 capture_id, f["app_protocol"], f["dns_name"], f["sni"], ex["id"]),
-            )
-            updated += 1
-        else:
-            # Insert new flow
-            flow_id = str(uuid.uuid4())[:8]
-            await db.execute(
-                """INSERT INTO flows
-                   (id, device_id, capture_id, src_ip, dst_ip, src_port, dst_port,
-                    protocol, app_protocol, service_group, dns_name, sni,
-                    bytes_total, packets_total, connection_count, allowed, notes)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,'')""",
-                (flow_id, device_id, capture_id,
-                 f["src_ip"], f["dst_ip"], f["src_port"], f["dst_port"],
-                 f["protocol"], f["app_protocol"], f["service_group"],
-                 f["dns_name"], f["sni"],
-                 f["bytes_total"], f["packets_total"], f["connection_count"]),
-            )
-            existing_map[key] = {"id": flow_id}
-            inserted += 1
-
-    now = datetime.now(timezone.utc).isoformat()
-    await db.execute(
-        "UPDATE devices SET status = 'flows_extracted', updated_at = ? WHERE id = ?",
-        (now, device_id),
-    )
+    merge_stats = await merge_flows_into_db(db=db, device_id=device_id, capture_id=capture_id, flows=flows)
     await db.commit()
 
-    return {"total_flows": inserted + updated, "new_flows": inserted, "merged_flows": updated, "flows_extracted": True}
+    return {**merge_stats, "flows_extracted": True}
 
 
 @router.get("/devices/{device_id}/flows", response_model=list[FlowOut])

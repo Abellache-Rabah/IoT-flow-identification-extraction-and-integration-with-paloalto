@@ -4,16 +4,20 @@
 export const state = {
     activeDevice: null, // current device profile being worked on
     activeCapture: null,
+    selectedUrls: [],   // URLs selected on the allowlist page for pushing to PAN-OS
     panos: {
         keygenHost: '', keygenUser: '', keygenPass: '',
         host: '', version: '11.1', key: '',
         ruleName: '', ruleFrom: '', ruleTo: '',
         ruleSource: '', ruleDest: '', ruleService: '',
         ruleApp: '', ruleTags: 'iot', ruleAction: 'allow',
+        ruleDescription: '', ruleUsername: '',
         logStart: true, logEnd: true,
         fwVsys: '', panDg: '', panVsys: '',
+        urlGroupName: '',
     }
 };
+
 
 // ---- API Helper ----
 const API = '';
@@ -45,14 +49,18 @@ import { renderDevices } from './pages/devices.js';
 import { renderCapture } from './pages/capture.js';
 import { renderAnalysis } from './pages/analysis.js';
 import { renderAllowlist } from './pages/allowlist.js';
-import { renderPanos } from './pages/panos.js';
+import { renderPanosStep1, renderPanosStep2, renderPanosStep3, renderPanosStep4, renderPanosStep5 } from './pages/panos_steps.js';
 
 const routes = {
     '/': renderDevices,
     '/capture': renderCapture,
     '/analysis': renderAnalysis,
     '/allowlist': renderAllowlist,
-    '/panos': renderPanos,
+    '/panos/step1': renderPanosStep1,
+    '/panos/step2': renderPanosStep2,
+    '/panos/step3': renderPanosStep3,
+    '/panos/step4': renderPanosStep4,
+    '/panos/step5': renderPanosStep5,
 };
 
 // ---- Router ----
@@ -64,7 +72,8 @@ function updateNav(path) {
     document.querySelectorAll('.nav-link').forEach(link => {
         const page = link.dataset.page;
         const linkPath = page === 'devices' ? '/' : `/${page}`;
-        link.classList.toggle('active', linkPath === path);
+        const isActive = path === linkPath || (linkPath === '/panos' && path.startsWith('/panos/'));
+        link.classList.toggle('active', isActive);
     });
 }
 

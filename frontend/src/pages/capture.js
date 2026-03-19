@@ -52,19 +52,24 @@ export async function renderCapture(container) {
 
       <div class="form-group">
         <label class="form-label">Interface</label>
-        <input class="form-input" id="cap-interface" placeholder="eth0 (default)" value="" style="max-width:300px;" />
+        <select class="form-select" id="cap-interface" style="max-width:300px;">
+          <option value="">Loading interfaces...</option>
+        </select>
+        <div id="iface-list" style="margin-top:6px;display:flex;flex-wrap:wrap;gap:6px;"></div>
       </div>
 
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Filter by MAC Address <span style="color:var(--text-muted);font-weight:normal;">(optional)</span></label>
-          <input class="form-input" id="cap-mac" placeholder="e.g. AA:BB:CC:DD:EE:FF"
-            value="${device.mac_address || ''}" />
-        </div>
-        <div class="form-group">
-          <label class="form-label">Filter by IP Address <span style="color:var(--text-muted);font-weight:normal;">(optional)</span></label>
-          <input class="form-input" id="cap-ip" placeholder="e.g. 10.0.0.50"
-            value="${device.ip_address || ''}" />
+      <div class="form-group">
+        <label class="form-label">Filter by IP Address <span style="color:var(--text-muted);font-weight:normal;">(optional)</span></label>
+        <input class="form-input" id="cap-ip" placeholder="e.g. 10.0.0.50"
+          value="${device.ip_address || ''}" style="max-width:300px;" />
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Filter by MAC Address <span style="color:var(--text-muted);font-weight:normal;">(optional)</span></label>
+        <input class="form-input" id="cap-mac" placeholder="e.g. AA:BB:CC:DD:EE:FF"
+          value="${device.mac_address || ''}" style="max-width:300px;" />
+        <div style="color:var(--text-muted);font-size:0.78rem;margin-top:6px;">
+          MAC filtering requires a specific interface (not <strong>any</strong>).
         </div>
       </div>
 
@@ -74,7 +79,7 @@ export async function renderCapture(container) {
           Show advanced BPF filter
         </label>
         <div id="cap-advanced-bpf" style="display:none;margin-top:8px;">
-          <label class="form-label">Custom BPF Filter <span style="color:var(--text-muted);font-weight:normal;">(overrides MAC/IP fields above)</span></label>
+          <label class="form-label">Custom BPF Filter <span style="color:var(--text-muted);font-weight:normal;">(overrides IP field above)</span></label>
           <input class="form-input" id="cap-filter" placeholder="e.g. host 10.0.0.50 and port 443" value="" />
         </div>
       </div>
@@ -83,34 +88,20 @@ export async function renderCapture(container) {
         <strong>BPF:</strong> <span id="bpf-preview-text"></span>
       </div>
 
-      <div style="display:flex;gap:10px;">
-        <button class="btn btn-primary btn-lg" id="btn-start">
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><polygon points="5,3 15,9 5,15" fill="currentColor"/></svg>
-          Start Capture
-        </button>
-        <button class="btn btn-danger btn-lg" id="btn-stop" style="display:none;">
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="4" y="4" width="10" height="10" rx="1" fill="currentColor"/></svg>
-          Stop Capture
-        </button>
-      </div>
-    </div>
-
-    <div id="capture-live" style="display:none;">
-      <div class="capture-stats" id="cap-stats">
+      <div class="capture-stats" id="cap-stats" style="display:none;">
         <div class="capture-stat">Packets: <span class="value" id="stat-packets">0</span></div>
         <div class="capture-stat">Elapsed: <span class="value" id="stat-elapsed">0s</span></div>
         <div class="capture-stat">File Size: <span class="value" id="stat-size">0 B</span></div>
       </div>
-      <div class="progress-bar"><div class="progress-fill" id="progress-fill" style="width:0%"></div></div>
+      <div class="progress-bar" id="capture-progress" style="display:none;"><div class="progress-fill" id="progress-fill" style="width:0%"></div></div>
 
-      <div style="border-radius:var(--radius-md);overflow:hidden;border:1px solid var(--border-color);">
-        <div class="terminal-header">
-          <div class="terminal-dots"><span></span><span></span><span></span></div>
-          <span class="terminal-title">tcpdump — live capture</span>
-        </div>
-        <div class="terminal" id="terminal-output">
-          <div class="terminal-line info">Capture starting...</div>
-        </div>
+      <div style="display:flex;gap:10px;margin-top:8px;">
+        <button class="btn btn-primary btn-lg" id="btn-start">
+          Start Capture
+        </button>
+        <button class="btn btn-danger btn-lg" id="btn-stop" style="display:none;">
+          Stop Capture
+        </button>
       </div>
     </div>
 
@@ -120,8 +111,7 @@ export async function renderCapture(container) {
       </div>
       <p style="color:var(--text-muted);font-size:0.85rem;margin-bottom:12px;">Already have a packet capture? Upload a .pcap or .pcapng file to analyze.</p>
       <div id="upload-zone" style="border:2px dashed var(--border-color);border-radius:var(--radius-md);padding:28px;text-align:center;cursor:pointer;transition:all var(--transition-fast);">
-        <svg width="36" height="36" viewBox="0 0 36 36" fill="none" style="margin-bottom:8px;opacity:0.4;"><path d="M18 6v18M12 12l6-6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 24v4a2 2 0 002 2h20a2 2 0 002-2v-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-        <p style="color:var(--text-secondary);font-size:0.9rem;">Click to select or drag & drop a <strong>.pcap / .pcapng</strong> file</p>
+        <p style="color:var(--text-secondary);font-size:0.9rem;">Click to select or drag &amp; drop a <strong>.pcap / .pcapng</strong> file</p>
         <input type="file" id="pcap-file-input" accept=".pcap,.pcapng,.cap" style="display:none;" />
       </div>
       <div id="upload-status" style="display:none;margin-top:12px;"></div>
@@ -168,25 +158,27 @@ export async function renderCapture(container) {
     updateBpfPreview();
   };
 
-  // Build BPF filter from MAC/IP fields
+  function normalizeMac(mac) {
+    const m = (mac || '').trim().toLowerCase();
+    if (!m) return '';
+    // Accept aa:bb:cc:dd:ee:ff (tcpdump expects colon-separated hex)
+    if (!/^([0-9a-f]{2}:){5}[0-9a-f]{2}$/.test(m)) return '';
+    return m;
+  }
+
+  // Build BPF filter from IP + MAC fields
   function buildBpfFilter() {
-    // If advanced BPF is set and toggle is on, use that
     if (advToggle.checked) {
       const custom = container.querySelector('#cap-filter').value.trim();
       if (custom) return custom;
     }
-
-    const mac = container.querySelector('#cap-mac').value.trim();
     const ip = container.querySelector('#cap-ip').value.trim();
+    const mac = normalizeMac(container.querySelector('#cap-mac').value);
 
     const parts = [];
-    if (mac) parts.push(`ether host ${mac}`);
-    if (ip) parts.push(`host ${ip}`);
-
-    if (parts.length === 0) return '';
-    if (parts.length === 1) return parts[0];
-    // Use "or" when both — capture traffic matching either the MAC or the IP
-    return `(${parts.join(' or ')})`;
+    if (ip) parts.push(` host ${ip}`);
+    if (mac) parts.push(` ether host ${mac}`);
+    return parts.join(' or ');
   }
 
   function updateBpfPreview() {
@@ -200,12 +192,31 @@ export async function renderCapture(container) {
     }
   }
 
-  // Update preview on input changes
-  ['#cap-mac', '#cap-ip', '#cap-filter'].forEach(sel => {
+  ['#cap-ip', '#cap-mac', '#cap-filter', '#cap-interface'].forEach(sel => {
     const el = container.querySelector(sel);
-    if (el) el.addEventListener('input', updateBpfPreview);
+    if (el) {
+      el.addEventListener('input', updateBpfPreview);
+      el.addEventListener('change', updateBpfPreview);
+    }
   });
   updateBpfPreview();
+
+  // --- Load Interfaces ---
+  async function loadInterfaces() {
+    try {
+      const res = await api('/api/capture/interfaces');
+      const sel = container.querySelector('#cap-interface');
+      sel.innerHTML = `<option value="">any (default)</option>`;
+      (res.interfaces || []).forEach(iface => {
+        const opt = document.createElement('option');
+        opt.value = iface;
+        opt.textContent = iface;
+        if (iface === 'any') { opt.selected = true; opt.textContent = 'any (capture all)'; }
+        sel.appendChild(opt);
+      });
+    } catch (_) { /* ignore */ }
+  }
+  await loadInterfaces();
 
   // --- PCAP Upload ---
   const uploadZone = container.querySelector('#upload-zone');
@@ -252,11 +263,11 @@ export async function renderCapture(container) {
       }
       const capture = await res.json();
       state.activeCapture = capture;
-      uploadStatus.innerHTML = `<span style="color:var(--accent-green);">✓ Uploaded! Redirecting to analysis...</span>`;
+      uploadStatus.innerHTML = `<span style="color:var(--accent-green);">Uploaded! Redirecting to analysis...</span>`;
       toast('PCAP uploaded successfully!', 'success');
       setTimeout(() => navigate('/analysis'), 800);
     } catch (err) {
-      uploadStatus.innerHTML = `<span style="color:var(--accent-red);">✗ ${err.message}</span>`;
+      uploadStatus.innerHTML = `<span style="color:var(--accent-red);">${err.message}</span>`;
       toast(err.message, 'error');
     }
   }
@@ -284,7 +295,10 @@ export async function renderCapture(container) {
                   <td>${c.packet_count.toLocaleString()}</td>
                   <td>${formatBytes(c.file_size)}</td>
                   <td>${new Date(c.started_at).toLocaleString()}</td>
-                  <td><button class="btn btn-ghost btn-sm analyze-btn" data-id="${c.id}">Analyze →</button></td>
+                  <td style="display:flex;gap:6px;">
+                    <button class="btn btn-ghost btn-sm analyze-btn" data-id="${c.id}">Analyze</button>
+                    <button class="btn btn-ghost btn-sm delete-capture-btn" data-id="${c.id}" title="Delete PCAP file" style="color:var(--accent-red);">Delete</button>
+                  </td>
                 </tr>
               `).join('')}
             </tbody>
@@ -297,56 +311,48 @@ export async function renderCapture(container) {
           navigate('/analysis');
         };
       });
+      list.querySelectorAll('.delete-capture-btn').forEach(btn => {
+        btn.onclick = async () => {
+          if (!confirm('Delete this PCAP capture and its file?')) return;
+          try {
+            await api(`/api/devices/${device.id}/captures/${btn.dataset.id}`, { method: 'DELETE' });
+            toast('Capture deleted', 'success');
+            await loadCaptures();
+          } catch (err) {
+            toast(err.message, 'error');
+          }
+        };
+      });
     } catch (err) {
       // silently fail
     }
   }
 
-  // Polling function
-  let lastLogCount = 0;
+  // Polling function (updates stats bar only — no terminal)
   async function pollStatus(captureId, totalDuration) {
     try {
       const status = await api(`/api/devices/${device.id}/capture-status`);
-      const terminal = container.querySelector('#terminal-output');
-      if (!terminal) { clearInterval(pollTimer); return; }
 
-      // Update stats
+      const statsBar = container.querySelector('#cap-stats');
+      if (!statsBar) { clearInterval(pollTimer); return; }
+      statsBar.style.display = 'flex';
       container.querySelector('#stat-packets').textContent = (status.packet_count || 0).toLocaleString();
       container.querySelector('#stat-elapsed').textContent = formatDuration(status.elapsed_seconds || 0);
       container.querySelector('#stat-size').textContent = formatBytes(status.file_size || 0);
 
+      const progressBar = container.querySelector('#capture-progress');
+      progressBar.style.display = 'block';
       if (totalDuration > 0) {
         const pct = Math.min(100, ((status.elapsed_seconds || 0) / totalDuration) * 100);
         container.querySelector('#progress-fill').style.width = `${pct}%`;
       }
 
-      // Append new logs
-      const logs = status.logs || [];
-      if (logs.length > lastLogCount) {
-        const newLines = logs.slice(lastLogCount);
-        for (const line of newLines) {
-          const el = document.createElement('div');
-          el.className = 'terminal-line';
-          el.textContent = line;
-          terminal.appendChild(el);
-        }
-        terminal.scrollTop = terminal.scrollHeight;
-        lastLogCount = logs.length;
-      }
-
-      // Check if capture finished
       if (!status.running) {
         clearInterval(pollTimer);
-        const el = document.createElement('div');
-        el.className = 'terminal-line info';
-        el.textContent = `✓ Capture complete — ${(status.packet_count || 0).toLocaleString()} packets, ${formatBytes(status.file_size || 0)}`;
-        terminal.appendChild(el);
-        terminal.scrollTop = terminal.scrollHeight;
-
         container.querySelector('#progress-fill').style.width = '100%';
         container.querySelector('#btn-stop').style.display = 'none';
         container.querySelector('#btn-start').style.display = 'inline-flex';
-        toast('Capture completed!', 'success');
+        toast(`Capture complete — ${(status.packet_count || 0).toLocaleString()} packets, ${formatBytes(status.file_size || 0)}`, 'success');
         loadCaptures();
       }
     } catch (err) {
@@ -361,11 +367,17 @@ export async function renderCapture(container) {
   btnStart.onclick = async () => {
     const duration = getSelectedDuration();
     const bpfFilter = buildBpfFilter();
+    const iface = container.querySelector('#cap-interface').value.trim();
+    const macNorm = normalizeMac(container.querySelector('#cap-mac').value);
+    if (macNorm && (!iface || iface === 'any')) {
+      toast('MAC filter requires selecting a specific interface (not "any")', 'error');
+      return;
+    }
     try {
       const capture = await api(`/api/devices/${device.id}/captures`, {
         method: 'POST',
         body: {
-          interface: container.querySelector('#cap-interface').value.trim(),
+          interface: iface,
           duration_seconds: duration,
           bpf_filter: bpfFilter,
         },
@@ -374,22 +386,11 @@ export async function renderCapture(container) {
       state.activeCapture = capture;
       btnStart.style.display = 'none';
       btnStop.style.display = 'inline-flex';
-      container.querySelector('#capture-live').style.display = 'block';
-
-      const terminal = container.querySelector('#terminal-output');
-      terminal.innerHTML = `<div class="terminal-line info">Capture started — monitoring traffic...</div>`;
-      if (bpfFilter) {
-        const bpfLine = document.createElement('div');
-        bpfLine.className = 'terminal-line';
-        bpfLine.textContent = `BPF filter: ${bpfFilter}`;
-        terminal.appendChild(bpfLine);
-      }
-      lastLogCount = 0;
+      toast(`Capture started${bpfFilter ? ` — BPF: ${bpfFilter}` : ''}`, 'success');
 
       // Poll every 2 seconds
       pollTimer = setInterval(() => pollStatus(capture.id, duration), 2000);
 
-      // Stop handler
       btnStop.onclick = async () => {
         clearInterval(pollTimer);
         try {
@@ -425,8 +426,6 @@ export async function renderCapture(container) {
     if (status.running) {
       btnStart.style.display = 'none';
       btnStop.style.display = 'inline-flex';
-      container.querySelector('#capture-live').style.display = 'block';
-      lastLogCount = 0;
       pollTimer = setInterval(() => pollStatus(status.capture_id, 0), 2000);
 
       btnStop.onclick = async () => {

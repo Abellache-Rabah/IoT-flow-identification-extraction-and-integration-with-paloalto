@@ -24,10 +24,13 @@ async def create_device(data: DeviceCreate):
     device_id = str(uuid.uuid4())[:8]
 
     await db.execute(
-        """INSERT INTO devices (id, name, device_type, vendor, mac_address, ip_address, description, status, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'new', ?, ?)""",
-        (device_id, data.name, data.device_type, data.vendor,
-         data.mac_address, data.ip_address, data.description, now, now),
+        """INSERT INTO devices (id, name, iot_group, requester, homologation_number, device_type, vendor, mac_address, ip_address, description, fan, model, hostname, site, family, serial_number, status, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?)""",
+        (device_id, data.name, data.iot_group, data.requester, data.homologation_number,
+         data.device_type, data.vendor,
+         data.mac_address, data.ip_address, data.description,
+         data.fan, data.model, data.hostname, data.site, data.family, data.serial_number,
+         now, now),
     )
     await db.commit()
 

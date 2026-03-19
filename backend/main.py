@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from database import get_db, close_db
 from config import APP_HOST, APP_PORT
 
-from routers import devices, capture, analysis, flows, panos
+from routers import devices, capture, analysis, flows, panos, urls
 
 
 @asynccontextmanager
@@ -41,6 +41,7 @@ app.include_router(capture.router)
 app.include_router(analysis.router)
 app.include_router(flows.router)
 app.include_router(panos.router)
+app.include_router(urls.router)
 
 # Health check
 @app.get("/api/health")

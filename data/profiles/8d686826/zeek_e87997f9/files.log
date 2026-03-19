@@ -1,0 +1,1 @@
+{"ts":1773847349.06937,"fuid":"F9fyo24qCiJ1Q0NRX4","uid":"CwFUUa21CyYVQFBp23","id.orig_h":"10.223.166.55","id.orig_p":54384,"id.resp_h":"20.190.160.20","id.resp_p":443,"source":"SSL","depth":0,"analyzers":["OCSP_REPLY"],"mime_type":"application/ocsp-response","duration":0.0,"local_orig":false,"is_orig":false,"seen_bytes":471,"missing_bytes":0,"overflow_bytes":0,"timedout":false}

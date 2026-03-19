@@ -22,7 +22,6 @@ export async function renderAnalysis(container) {
         <p class="page-subtitle">Zeek analysis for <strong>${device.name}</strong>${capture ? ` — Capture ${capture.id}` : ''}</p>
       </div>
       <button class="btn btn-danger btn-sm" id="btn-clear-flows" title="Delete all extracted flows and start fresh">
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style="margin-right:4px;"><path d="M1.75 3.5h10.5M5.25 3.5V2.333A.583.583 0 015.833 1.75h2.334a.583.583 0 01.583.583V3.5m1.75 0v8.167a.583.583 0 01-.583.583H4.083a.583.583 0 01-.583-.583V3.5h7m-4.667 2.333v4.084m2.334-4.084v4.084" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Clear All Flows
       </button>
     </div>
@@ -51,7 +50,7 @@ export async function renderAnalysis(container) {
       <div class="card" style="margin-bottom:20px;">
         <div class="card-header">
           <span class="card-title">Connections</span>
-          <button class="btn btn-success btn-sm" id="btn-extract-flows">Extract Flows →</button>
+          <button class="btn btn-success btn-sm" id="btn-go-allowlist" title="Review extracted flows">Go to Allow List</button>
         </div>
         <div class="filter-bar" id="conn-filters">
           <div class="form-group">
@@ -98,6 +97,16 @@ export async function renderAnalysis(container) {
         <div class="card-header"><span class="card-title">OT / Industrial Protocols</span></div>
         <div id="ot-tables"></div>
       </div>
+
+      <!-- URL Extraction Results -->
+      <div class="card" id="url-card" style="display:none;margin-bottom:20px;">
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+          <span class="card-title">Extracted URLs / Hostnames</span>
+          <span id="url-count-badge" style="font-size:0.78rem;background:var(--accent-indigo);color:#fff;padding:2px 10px;border-radius:12px;"></span>
+        </div>
+        <p style="color:var(--text-muted);font-size:0.82rem;margin:0 0 10px;">Hostnames found by Zeek (DNS queries + TLS SNI). Use these to create a Custom URL Category in PAN-OS (PAN-OS API → Step 3).</p>
+        <div id="url-list" style="max-height:260px;overflow-y:auto;background:var(--bg-tertiary);border-radius:var(--radius-sm);padding:10px;font-family:var(--font-mono,monospace);font-size:0.82rem;"></div>
+      </div>
     </div>
   `;
 
@@ -140,8 +149,13 @@ export async function renderAnalysis(container) {
           btn.textContent = 'Analyzing...';
           btn.disabled = true;
           try {
-            await api(`/api/devices/${device.id}/captures/${btn.dataset.id}/analyze`, { method: 'POST' });
-            toast('Zeek analysis complete!', 'success');
+            const res = await api(`/api/devices/${device.id}/captures/${btn.dataset.id}/analyze`, { method: 'POST' });
+            const fs = res.flow_extraction || {};
+            if (typeof fs.total_flows === 'number') {
+              toast(`Zeek analysis complete — flows extracted (${fs.total_flows} total)`, 'success');
+            } else {
+              toast('Zeek analysis complete!', 'success');
+            }
             await loadAnalysis(btn.dataset.id);
           } catch (err) {
             toast(err.message, 'error');
@@ -270,16 +284,28 @@ export async function renderAnalysis(container) {
         }
       } catch (e) { /* ignore */ }
 
-      // Extract flows button
-      container.querySelector('#btn-extract-flows').onclick = async () => {
-        try {
-          const result = await api(`/api/devices/${device.id}/captures/${captureId}/extract-flows`, { method: 'POST' });
-          toast(`${result.total_flows} flows (${result.new_flows} new, ${result.merged_flows} merged)`, 'success');
-          navigate('/allowlist');
-        } catch (err) {
-          toast(err.message, 'error');
+      // Flows are auto-extracted during Zeek analysis; just navigate.
+      container.querySelector('#btn-go-allowlist').onclick = () => navigate('/allowlist');
+
+      // Load URLs from Zeek analysis (DNS + TLS SNI)
+      try {
+        const urlData = await api(`/api/devices/${device.id}/captures/${captureId}/urls`);
+        const urlCard = container.querySelector('#url-card');
+        const urlList = container.querySelector('#url-list');
+        const badge = container.querySelector('#url-count-badge');
+        const urls = urlData.urls || [];
+        if (urls.length > 0) {
+          badge.textContent = `${urls.length} URL${urls.length > 1 ? 's' : ''}`;
+          urlList.innerHTML = urls.map(u => `
+            <div style="padding:4px 2px;border-bottom:1px solid var(--border-color);color:var(--accent-cyan);word-break:break-all;">${u}</div>
+          `).join('');
+          urlCard.style.display = 'block';
+        } else {
+          badge.textContent = '0 URLs';
+          urlList.innerHTML = '<span style="color:var(--text-muted);font-size:0.82rem;">No DNS or TLS hostnames found in this capture.</span>';
+          urlCard.style.display = 'block';
         }
-      };
+      } catch (e) { /* silently ignore if not analyzed yet */ }
 
     } catch (err) {
       toast(err.message, 'error');

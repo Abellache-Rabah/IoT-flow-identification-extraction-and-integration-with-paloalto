@@ -1,546 +1,496 @@
-// ---- PAN-OS API Page (Firewall Direct + Panorama — REST only) ----
-import { api, toast, state } from '../main.js';
+// ---- PAN-OS Wizard (Modular Step System) ----
+import { api, toast, state, navigate } from '../main.js';
 
-export async function renderPanos(container) {
+/**
+ * Main entrance for each step page.
+ * Renders the layout and the specific step content.
+ */
+export async function renderPanosWizard(container, step = 1) {
   const device = state.activeDevice;
   if (!device) {
-    container.innerHTML = `<div class="empty-state"><h3>No device selected</h3><p>Go to <a href="#/">Devices</a> first.</p></div>`;
+    container.innerHTML = `<div class="card box-design"><div class="empty-state"><h3>No device selected</h3><p>Go to <a href="#/">Devices</a> first.</p></div></div>`;
     return;
   }
 
   const p = state.panos;
-
   container.innerHTML = `
     <div class="page-header">
-      <h1 class="page-title">PAN-OS API</h1>
-      <p class="page-subtitle">Push firewall rules for <strong>${device.name}</strong> to Palo Alto Firewall or Panorama</p>
+      <h1 class="page-title">PAN-OS Wizard — Step ${step} of 5</h1>
+      <p class="page-subtitle">${getStepSubtitle(step, device.name)}</p>
     </div>
 
-    <!-- Generate API Key -->
-    <div class="card" style="margin-bottom:20px;">
-      <div class="card-header"><span class="card-title">🔑 Generate API Key</span></div>
-      <p style="color:var(--text-muted);font-size:0.85rem;margin-bottom:12px;">Enter credentials to generate an API key from the firewall/Panorama.</p>
-      <div class="var-panel">
-        <div class="form-group">
-          <label class="form-label">Host</label>
+    <!-- Step Indicator -->
+    <div class="step-indicator-bar box-design">
+      ${[1, 2, 3, 4, 5].map(n => `
+        <a href="#/panos/step${n}" class="step-btn ${n === step ? 'active' : ''} ${n < step ? 'completed' : ''}">
+          <span class="step-num">${n}</span>
+          <span class="step-label">${getStepLabel(n)}</span>
+        </a>
+      `).join('<div class="step-line"></div>')}
+    </div>
+
+    <!-- Step Content Container -->
+    <div id="wizard-content"></div>
+
+    <!-- Global Preview / Review Area -->
+    <div class="card box-design" id="preview-card" style="margin-top:20px;display:none;">
+      <div class="card-header">
+        <span class="card-title">Review Request</span>
+        <button class="btn btn-ghost btn-sm" id="btn-close-preview">Close</button>
+      </div>
+      <div id="preview-body" style="padding:16px;"></div>
+    </div>
+
+    <!-- Global API Response -->
+    <div class="card box-design" id="response-card" style="margin-top:20px;display:none;">
+      <div class="card-header">
+        <span class="card-title">API Response</span>
+        <button class="btn btn-ghost btn-sm" id="btn-copy-response">Copy</button>
+      </div>
+      <div class="rule-preview" id="response-text" style="max-height:300px;overflow-y:auto;white-space:pre-wrap;font-size:0.82rem;font-family:var(--font-mono);"></div>
+    </div>
+  `;
+
+  const content = container.querySelector('#wizard-content');
+
+  // Render specific step
+  switch (step) {
+    case 1: renderStep1(content, p); break;
+    case 2: renderStep2(content, p); break;
+    case 3: await renderStep3(content, p, device); break;
+    case 4: await renderStep4(content, p, device); break;
+    case 5: renderStep5(content, p, device); break;
+  }
+
+  // Common UI logic (Persistence, Copy, etc.)
+  setupWizardLogic(container, p);
+}
+
+function getStepLabel(n) {
+  return ['API Token', 'Connection', 'URL Category', 'Rule Config', 'Push'][n - 1];
+}
+
+function getStepSubtitle(n, deviceName) {
+  const subs = [
+    'Generate an API key for authentication',
+    'Configure connection settings for Panorama or Firewall',
+    'Create a Custom URL Category from discovered hostnames',
+    'Configure the security rule parameters',
+    'Preview and push the configuration'
+  ];
+  return `${subs[n - 1]} for <strong>${deviceName}</strong>`;
+}
+
+// ---- STEP 1: API Token ----
+function renderStep1(container, p) {
+  container.innerHTML = `
+    <div class="card box-design">
+      <div class="card-header"><span class="card-title">1. Generate API Key</span></div>
+      <p class="text-muted" style="margin-bottom:16px;">Enter credentials to retrieve an API key.</p>
+      <div class="form-group">
+          <label class="form-label">Management Host</label>
           <input class="form-input pa-persist" id="keygen-host" data-key="keygenHost" placeholder="e.g. 192.168.1.1" value="${p.keygenHost}" />
-        </div>
-        <div class="form-group">
-          <label class="form-label">Username</label>
-          <input class="form-input pa-persist" id="keygen-user" data-key="keygenUser" placeholder="admin" value="${p.keygenUser}" />
-        </div>
-        <div class="form-group">
-          <label class="form-label">Password</label>
-          <input class="form-input pa-persist" id="keygen-pass" data-key="keygenPass" placeholder="password" type="password" value="${p.keygenPass}" />
-        </div>
       </div>
-      <div style="display:flex;gap:10px;margin-top:12px;align-items:center;">
+      <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Username</label>
+            <input class="form-input pa-persist" id="keygen-user" data-key="keygenUser" placeholder="admin" value="${p.keygenUser}" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Password</label>
+            <input class="form-input pa-persist" id="keygen-pass" data-key="keygenPass" type="password" value="${p.keygenPass}" />
+          </div>
+      </div>
+      <div style="display:flex;gap:12px;align-items:center;margin-top:10px;">
+        <button class="btn btn-ghost" id="btn-keygen-preview">Review Request</button>
         <button class="btn btn-primary" id="btn-keygen">Generate Key</button>
-        <span id="keygen-status" style="font-size:0.85rem;color:var(--text-muted);"></span>
+        <span id="keygen-status" class="text-muted" style="font-size:0.85rem;"></span>
       </div>
-      <div id="keygen-result" style="display:none;margin-top:12px;">
-        <label style="font-weight:600;color:var(--text-secondary);font-size:0.82rem;">API Key:</label>
-        <div style="display:flex;gap:8px;align-items:center;margin-top:4px;">
-          <input class="form-input" id="keygen-key-output" readonly style="font-family:var(--font-mono,monospace);font-size:0.82rem;" />
-          <button class="btn btn-ghost btn-sm" id="btn-keygen-copy">Copy</button>
-          <button class="btn btn-ghost btn-sm" id="btn-keygen-use">Use as API Key ↓</button>
+      <div id="keygen-result" style="display:none;margin-top:16px;padding-top:16px;border-top:1px solid var(--border-color);">
+        <label class="form-label">Resulting API Key</label>
+        <div style="display:flex;gap:8px;">
+          <input class="form-input" id="keygen-key-output" readonly style="font-family:var(--font-mono);font-size:0.8rem;" />
+          <button class="btn btn-secondary btn-sm" id="btn-keygen-use">Apply & Continue</button>
         </div>
       </div>
     </div>
+  `;
 
-    <!-- Connection Settings -->
-    <div class="card" style="margin-bottom:20px;">
-      <div class="card-header"><span class="card-title">⚙️ Connection Settings</span></div>
-      <div class="var-panel">
-        <div class="form-group">
-          <label class="form-label">Host (hostname or IP)</label>
-          <input class="form-input pa-persist" id="pa-host" data-key="host" placeholder="e.g. 192.168.1.1 or panorama.example.com" value="${p.host}" />
-        </div>
+  container.querySelector('#btn-keygen-preview').onclick = () => {
+    const host = container.querySelector('#keygen-host').value.trim();
+    const user = container.querySelector('#keygen-user').value.trim();
+    const pass = container.querySelector('#keygen-pass').value.trim();
+    showPreview(container.closest('#app-main-content') || document, [
+      { label: 'Method', text: 'GET' },
+      { label: 'URL', text: `https://${host || '[HOST]'}/api/` },
+      { label: 'Parameters', text: `type=keygen\nuser=${user || '[USER]'}\npassword=${pass ? '********' : '[PASS]'}` }
+    ]);
+  };
+
+  container.querySelector('#btn-keygen').onclick = async () => {
+    const host = container.querySelector('#keygen-host').value.trim();
+    const user = container.querySelector('#keygen-user').value.trim();
+    const pass = container.querySelector('#keygen-pass').value.trim();
+    if (!host || !user || !pass) { toast('Fill all fields', 'error'); return; }
+
+    const status = container.querySelector('#keygen-status');
+    status.textContent = 'Processing...';
+    try {
+      const res = await api('/api/panos/proxy', {
+        method: 'POST', body: {
+          http_method: 'GET', url: `https://${host}/api/`,
+          params: { type: 'keygen', user, password: pass }
+        }
+      });
+      const match = (res.body || '').match(/<key>(.*?)<\/key>/);
+      if (match) {
+        container.querySelector('#keygen-result').style.display = 'block';
+        container.querySelector('#keygen-key-output').value = match[1];
+        status.textContent = 'Success';
+        status.style.color = 'var(--accent-green)';
+        if (!p.host) p.host = host;
+      } else {
+        status.textContent = 'Parse Error';
+        status.style.color = 'var(--accent-red)';
+      }
+    } catch (e) { status.textContent = `Error: ${e.message}`; status.style.color = 'var(--accent-red)'; }
+  };
+
+  container.querySelector('#btn-keygen-use').onclick = () => {
+    p.key = container.querySelector('#keygen-key-output').value;
+    p.host = container.querySelector('#keygen-host').value.trim();
+    toast('Key applied', 'success');
+    navigate('/panos/step2');
+  };
+}
+
+// ---- STEP 2: Connection ----
+function renderStep2(container, p) {
+  container.innerHTML = `
+    <div class="card box-design">
+      <div class="card-header"><span class="card-title">2. Connection Settings</span></div>
+      <div class="form-group">
+        <label class="form-label">Host (FQDN or IP)</label>
+        <input class="form-input pa-persist" id="pa-host" data-key="host" value="${p.host}" />
+      </div>
+      <div class="form-row">
         <div class="form-group">
           <label class="form-label">PAN-OS Version</label>
           <input class="form-input pa-persist" id="pa-version" data-key="version" placeholder="e.g. 11.1" value="${p.version}" />
         </div>
         <div class="form-group">
           <label class="form-label">API Key</label>
-          <input class="form-input pa-persist" id="pa-key" data-key="key" placeholder="Your API key" type="password" value="${p.key}" />
+          <input class="form-input pa-persist" id="pa-key" data-key="key" type="password" value="${p.key}" />
         </div>
       </div>
-    </div>
-
-    <!-- Rule Configuration -->
-    <div class="card" style="margin-bottom:20px;">
-      <div class="card-header">
-        <span class="card-title">📋 Rule Configuration</span>
-        <button class="btn btn-ghost btn-sm" id="btn-load-from-flows" style="gap:4px;">
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1 7h12M8 2l5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          Load from Allowed Flows
-        </button>
+      <div class="nav-footer">
+        <button class="btn btn-secondary" onclick="window.location.hash='#/panos/step1'">Back</button>
+        <button class="btn btn-primary" onclick="window.location.hash='#/panos/step3'">Continue</button>
       </div>
-      <div class="var-panel">
+    </div>
+  `;
+}
+
+// ---- STEP 3: Category ----
+async function renderStep3(container, p, device) {
+  const urls = state.selectedUrls || [];
+  container.innerHTML = `
+    <div class="card box-design">
+      <div class="card-header">
+        <span class="card-title">3. URL Category</span>
+        <span class="badge ${urls.length ? 'badge-primary' : 'badge-muted'}">${urls.length} hostnames selected</span>
+      </div>
+      <p class="text-muted" style="margin-bottom:12px;">Create a Custom URL Category from discovered hostnames.</p>
+      
+      <div class="url-scroll-box box-design">
+        ${urls.length ? urls.map(u => `<div class="url-item">${u}</div>`).join('') : '<p class="text-muted">No hostnames selected. Go to Allow List to select them.</p>'}
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Category Name *</label>
+        <input class="form-input pa-persist" id="url-grp-name" data-key="urlGroupName" value="${p.urlGroupName || `iot-${device.name.toLowerCase().replace(/\s+/g, '-')}-urls`}" />
+      </div>
+
+      <div class="form-row">
         <div class="form-group">
-          <label class="form-label">Rule Name</label>
-          <input class="form-input pa-persist" id="rule-name" data-key="ruleName" placeholder="e.g. IoT-camera-allow" value="${p.ruleName}" />
+          <label class="form-label">Device Group (Panorama)</label>
+          <input class="form-input pa-persist" id="url-pan-dg" data-key="panDg" value="${p.panDg}" />
         </div>
-        <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-          <div class="form-group">
-            <label class="form-label">From Zone</label>
-            <input class="form-input pa-persist" id="rule-from" data-key="ruleFrom" placeholder="e.g. CAMPUS-IoTLab" value="${p.ruleFrom}" />
-          </div>
-          <div class="form-group">
-            <label class="form-label">To Zone</label>
-            <input class="form-input pa-persist" id="rule-to" data-key="ruleTo" placeholder="e.g. BACKBONE" value="${p.ruleTo}" />
-          </div>
+        <div class="form-group">
+          <label class="form-label">Target VSYS (Firewall)</label>
+          <input class="form-input pa-persist" id="url-fw-vsys" data-key="fwVsys" value="${p.fwVsys}" />
         </div>
-        <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-          <div class="form-group">
-            <label class="form-label">Source <span style="color:var(--text-muted);font-weight:normal;">(comma-sep, or "any")</span></label>
-            <input class="form-input pa-persist" id="rule-source" data-key="ruleSource" placeholder="e.g. IOT-TEST or any" value="${p.ruleSource}" />
-          </div>
-          <div class="form-group">
-            <label class="form-label">Destination <span style="color:var(--text-muted);font-weight:normal;">(comma-sep, or "any")</span></label>
-            <input class="form-input pa-persist" id="rule-dest" data-key="ruleDest" placeholder="e.g. 10.0.1.0/24 or any" value="${p.ruleDest}" />
-          </div>
-        </div>
-        <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-          <div class="form-group">
-            <label class="form-label">Service <span style="color:var(--text-muted);font-weight:normal;">(comma-sep, or "any")</span></label>
-            <input class="form-input pa-persist" id="rule-service" data-key="ruleService" placeholder="e.g. application-default or any" value="${p.ruleService}" />
-          </div>
-          <div class="form-group">
-            <label class="form-label">Application <span style="color:var(--text-muted);font-weight:normal;">(comma-sep, or "any")</span></label>
-            <input class="form-input pa-persist" id="rule-app" data-key="ruleApp" placeholder="e.g. ssl, web-browsing or any" value="${p.ruleApp}" />
-          </div>
-        </div>
-        <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
-          <div class="form-group">
-            <label class="form-label">Tags <span style="color:var(--text-muted);font-weight:normal;">(comma-sep)</span></label>
-            <input class="form-input pa-persist" id="rule-tags" data-key="ruleTags" placeholder="e.g. iot, onboarding" value="${p.ruleTags}" />
-          </div>
-          <div class="form-group">
-            <label class="form-label">Action</label>
-            <select class="form-select pa-persist-select" id="rule-action" data-key="ruleAction">
-              <option value="allow" ${p.ruleAction === 'allow' ? 'selected' : ''}>Allow</option>
-              <option value="deny" ${p.ruleAction === 'deny' ? 'selected' : ''}>Deny</option>
-              <option value="drop" ${p.ruleAction === 'drop' ? 'selected' : ''}>Drop</option>
-            </select>
-          </div>
-          <div class="form-group" style="display:flex;gap:16px;align-items:flex-end;padding-bottom:6px;">
-            <label style="display:flex;align-items:center;gap:6px;color:var(--text-secondary);font-size:0.85rem;cursor:pointer;">
-              <input type="checkbox" id="rule-log-start" ${p.logStart ? 'checked' : ''} /> Log Start
-            </label>
-            <label style="display:flex;align-items:center;gap:6px;color:var(--text-secondary);font-size:0.85rem;cursor:pointer;">
-              <input type="checkbox" id="rule-log-end" ${p.logEnd ? 'checked' : ''} /> Log End
-            </label>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Tabs: Firewall / Panorama -->
-    <div class="card" style="margin-bottom:20px;">
-      <div style="display:flex;gap:0;border-bottom:2px solid var(--border-color);">
-        <button class="pa-tab active" data-tab="firewall" style="flex:1;padding:12px 16px;background:none;border:none;border-bottom:2px solid var(--accent-indigo);margin-bottom:-2px;color:var(--text-primary);font-weight:600;cursor:pointer;font-size:0.9rem;">🔥 Firewall (Direct)</button>
-        <button class="pa-tab" data-tab="panorama" style="flex:1;padding:12px 16px;background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;color:var(--text-muted);font-weight:500;cursor:pointer;font-size:0.9rem;">🏢 Panorama</button>
       </div>
 
-      <!-- Firewall Tab -->
-      <div class="pa-panel" id="panel-firewall" style="padding:16px 0;">
-        <p style="color:var(--text-muted);font-size:0.85rem;margin-bottom:14px;">
-          Push security rules directly to a PAN-OS firewall via REST API.
-        </p>
-        <div class="var-panel" style="margin-bottom:14px;">
-          <div class="form-group">
-            <label class="form-label">VSYS</label>
-            <input class="form-input pa-persist" id="fw-vsys" data-key="fwVsys" placeholder="e.g. vsys1" value="${p.fwVsys}" />
-          </div>
-        </div>
-        <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px;">
-          <button class="btn btn-primary" id="btn-fw-preview">Preview Request</button>
-          <button class="btn btn-success" id="btn-fw-push">Push Rule</button>
-          <button class="btn btn-secondary" id="btn-fw-commit">Commit</button>
-        </div>
-        <div id="fw-preview" style="display:none;"></div>
+      <div style="display:flex;gap:12px;margin-top:16px;">
+        <button class="btn btn-ghost" id="btn-push-cat-preview">Review Request</button>
+        <button class="btn btn-success" id="btn-push-cat">Push Category to Panorama</button>
+        <span id="push-cat-status" class="text-muted" style="font-size:0.85rem;"></span>
       </div>
 
-      <!-- Panorama Tab -->
-      <div class="pa-panel" id="panel-panorama" style="padding:16px 0;display:none;">
-        <p style="color:var(--text-muted);font-size:0.85rem;margin-bottom:14px;">
-          Push security post-rules to Panorama, then commit &amp; push to device groups.
-        </p>
-        <div class="var-panel" style="margin-bottom:14px;">
-          <div class="form-group">
-            <label class="form-label">Device Group</label>
-            <input class="form-input pa-persist" id="pan-dg" data-key="panDg" placeholder="e.g. MY-DEVICE-GROUP" value="${p.panDg}" />
-          </div>
-          <div class="form-group">
-            <label class="form-label">VSYS <span style="color:var(--text-muted);font-weight:normal;">(for partial commit)</span></label>
-            <input class="form-input pa-persist" id="pan-vsys" data-key="panVsys" placeholder="e.g. vsys1" value="${p.panVsys}" />
-          </div>
-        </div>
-        <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px;">
-          <button class="btn btn-primary" id="btn-pan-preview">Preview Request</button>
-          <button class="btn btn-success" id="btn-pan-push">1. Push Post-Rule</button>
-          <button class="btn btn-secondary" id="btn-pan-commit">2. Commit to Panorama</button>
-          <button class="btn btn-secondary" id="btn-pan-push-dg">3. Push to Device Group</button>
-        </div>
-        <div id="pan-preview" style="display:none;"></div>
+      <div class="nav-footer">
+        <button class="btn btn-secondary" onclick="window.location.hash='#/panos/step2'">Back</button>
+        <button class="btn btn-primary" onclick="window.location.hash='#/panos/step4'">Continue</button>
       </div>
-    </div>
-
-    <!-- Response -->
-    <div class="card" id="response-card" style="margin-bottom:20px;display:none;">
-      <div class="card-header">
-        <span class="card-title">API Response</span>
-        <button class="btn btn-ghost btn-sm" id="btn-copy-response">Copy</button>
-      </div>
-      <div class="rule-preview" id="response-text" style="max-height:350px;overflow-y:auto;white-space:pre-wrap;font-size:0.82rem;"></div>
     </div>
   `;
 
-  // ===== STATE PERSISTENCE — save on every input change =====
+  container.querySelector('#btn-push-cat-preview').onclick = () => {
+    const body = { entry: { '@name': p.urlGroupName, list: { member: urls }, type: 'URL List', description: `IoT URLs - ${device.name}` } };
+    let location = 'vsys', locVal = p.fwVsys, locKey = 'vsys';
+    if (p.panDg) { location = 'device-group'; locVal = p.panDg; locKey = 'device-group'; }
+
+    showPreview(container.closest('#app-main-content') || document, [
+      { label: 'Method', text: 'POST' },
+      { label: 'URL', text: `https://${p.host || '[HOST]'}/restapi/v${p.version || '[VER]'}/Objects/CustomURLCategories` },
+      { label: 'Query Params', text: `name=${p.urlGroupName}\nlocation=${location}\n${locKey}=${locVal}` },
+      { label: 'Body', text: JSON.stringify(body, null, 2) }
+    ]);
+  };
+
+  container.querySelector('#btn-push-cat').onclick = () => pushCategory(container, p, device);
+}
+
+// ---- STEP 4: Rule Config ----
+async function renderStep4(container, p, device) {
+  container.innerHTML = `
+    <div class="card box-design">
+      <div class="card-header"><span class="card-title">4. Rule Configuration</span></div>
+      <div id="rule-load-banner" class="banner box-design">Auto-loading flows from analysis...</div>
+      
+      <div class="form-group">
+        <label class="form-label">Rule Name</label>
+        <input class="form-input pa-persist" id="rule-name" data-key="ruleName" value="${p.ruleName}" />
+      </div>
+
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">From Zone</label><input class="form-input pa-persist" id="rule-from" data-key="ruleFrom" value="${p.ruleFrom}" /></div>
+        <div class="form-group"><label class="form-label">To Zone</label><input class="form-input pa-persist" id="rule-to" data-key="ruleTo" value="${p.ruleTo}" /></div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Source</label><input class="form-input pa-persist" id="rule-source" data-key="ruleSource" value="${p.ruleSource}" /></div>
+        <div class="form-group"><label class="form-label">Destination</label><input class="form-input pa-persist" id="rule-dest" data-key="ruleDest" value="${p.ruleDest}" /></div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">App</label><input class="form-input pa-persist" id="rule-app" data-key="ruleApp" value="${p.ruleApp}" /></div>
+        <div class="form-group"><label class="form-label">Service</label><input class="form-input pa-persist" id="rule-service" data-key="ruleService" value="${p.ruleService}" /></div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">URL Category</label>
+        <input class="form-input pa-persist" id="rule-url-group" data-key="urlGroupName" value="${p.urlGroupName}" placeholder="Optional custom category" />
+      </div>
+
+      <div class="nav-footer">
+        <button class="btn btn-secondary" onclick="window.location.hash='#/panos/step3'">Back</button>
+        <button class="btn btn-primary" onclick="window.location.hash='#/panos/step5'">Continue</button>
+      </div>
+    </div>
+  `;
+
+  // Auto-load flows
+  try {
+    const res = await api(`/api/devices/${device.id}/panos/rules-from-flows`, { method: 'POST', body: { variables: {} } });
+    if (res.entry) {
+      const e = res.entry;
+      if (!p.ruleName) p.ruleName = e['@name'];
+      if (!p.ruleSource) p.ruleSource = (e.source?.member || []).join(', ');
+      if (!p.ruleDest) p.ruleDest = (e.destination?.member || []).join(', ');
+      if (!p.ruleService) p.ruleService = (e.service?.member || []).join(', ');
+      if (!p.ruleApp) p.ruleApp = (e.application?.member || []).join(', ');
+      const banner = container.querySelector('#rule-load-banner');
+      banner.innerHTML = 'Flows loaded successfully';
+      banner.style.background = 'var(--accent-green-dim)';
+      // update inputs
+      container.querySelector('#rule-name').value = p.ruleName;
+      container.querySelector('#rule-source').value = p.ruleSource;
+      container.querySelector('#rule-dest').value = p.ruleDest;
+      container.querySelector('#rule-service').value = p.ruleService;
+      container.querySelector('#rule-app').value = p.ruleApp;
+    }
+  } catch (e) { container.querySelector('#rule-load-banner').textContent = 'Flow load failed. Manual entry required.'; }
+}
+
+// ---- STEP 5: Push ----
+function renderStep5(container, p, device) {
+  container.innerHTML = `
+    <div class="card box-design">
+      <div class="card-header"><span class="card-title">5. Push Rule</span></div>
+      
+      <div class="push-toggle box-design">
+        <button class="push-btn active" id="tab-panorama">Panorama</button>
+        <button class="push-btn" id="tab-firewall">Direct Firewall</button>
+      </div>
+
+      <div id="push-panel-panorama" class="push-panel">
+        <div class="form-group">
+          <label class="form-label">Device Group</label>
+          <input class="form-input pa-persist" id="pan-dg" data-key="panDg" value="${p.panDg}" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Target Devices (Serials)</label>
+          <input class="form-input pa-persist" id="pan-target" data-key="panTarget" value="${p.panTarget}" placeholder="Optional: serial1, serial2" />
+        </div>
+        <div style="display:flex;gap:12px;margin-top:16px;">
+          <button class="btn btn-ghost" id="btn-pan-preview">Review Request</button>
+          <button class="btn btn-success" id="btn-push-pan" style="flex:1;">Push to Panorama</button>
+        </div>
+      </div>
+
+      <div id="push-panel-firewall" class="push-panel" style="display:none;">
+        <div class="form-group">
+          <label class="form-label">VSYS</label>
+          <input class="form-input pa-persist" id="fw-vsys" data-key="fwVsys" value="${p.fwVsys}" />
+        </div>
+        <div style="display:flex;gap:12px;margin-top:16px;">
+          <button class="btn btn-ghost" id="btn-fw-preview">Review Request</button>
+          <button class="btn btn-success" id="btn-push-fw" style="flex:1;">Push to Firewall</button>
+        </div>
+      </div>
+
+      <div class="nav-footer">
+        <button class="btn btn-secondary" onclick="window.location.hash='#/panos/step4'">Back</button>
+      </div>
+    </div>
+  `;
+
+  // Tab logic
+  const tPan = container.querySelector('#tab-panorama');
+  const tFw = container.querySelector('#tab-firewall');
+  const pPan = container.querySelector('#push-panel-panorama');
+  const pFw = container.querySelector('#push-panel-firewall');
+
+  tPan.onclick = () => { tPan.classList.add('active'); tFw.classList.remove('active'); pPan.style.display = 'block'; pFw.style.display = 'none'; };
+  tFw.onclick = () => { tFw.classList.add('active'); tPan.classList.remove('active'); pFw.style.display = 'block'; pPan.style.display = 'none'; };
+
+  container.querySelector('#btn-pan-preview').onclick = () => {
+    const body = getRuleConfig(p, 'panorama');
+    showPreview(container.closest('#app-main-content') || document, [
+      { label: 'Method', text: 'POST' },
+      { label: 'URL', text: `https://${p.host || '[HOST]'}/restapi/v${p.version || '[VER]'}/Policies/SecurityPostRules` },
+      { label: 'Query Params', text: `name=${p.ruleName}\nlocation=device-group\ndevice-group=${p.panDg}` },
+      { label: 'Body', text: JSON.stringify(body, null, 2) }
+    ]);
+  };
+
+  container.querySelector('#btn-fw-preview').onclick = () => {
+    const body = getRuleConfig(p, 'firewall');
+    showPreview(container.closest('#app-main-content') || document, [
+      { label: 'Method', text: 'POST' },
+      { label: 'URL', text: `https://${p.host || '[HOST]'}/restapi/v${p.version || '[VER]'}/Policies/SecurityRules` },
+      { label: 'Query Params', text: `name=${p.ruleName}\nlocation=vsys\nvsys=${p.fwVsys}` },
+      { label: 'Body', text: JSON.stringify(body, null, 2) }
+    ]);
+  };
+
+  container.querySelector('#btn-push-pan').onclick = () => pushRule(container, p, 'panorama');
+  container.querySelector('#btn-push-fw').onclick = () => pushRule(container, p, 'firewall');
+}
+
+// ---- HELPERS & LOGIC ----
+
+function setupWizardLogic(container, p) {
   container.querySelectorAll('.pa-persist').forEach(el => {
     el.addEventListener('input', () => { p[el.dataset.key] = el.value; });
   });
-  container.querySelectorAll('.pa-persist-select').forEach(el => {
-    el.addEventListener('change', () => { p[el.dataset.key] = el.value; });
-  });
-  container.querySelector('#rule-log-start').addEventListener('change', e => { p.logStart = e.target.checked; });
-  container.querySelector('#rule-log-end').addEventListener('change', e => { p.logEnd = e.target.checked; });
 
-  // ===== TAB SWITCHING =====
-  const tabs = container.querySelectorAll('.pa-tab');
-  const panels = container.querySelectorAll('.pa-panel');
-  tabs.forEach(tab => {
-    tab.onclick = () => {
-      tabs.forEach(t => { t.classList.remove('active'); t.style.borderBottomColor = 'transparent'; t.style.color = 'var(--text-muted)'; });
-      panels.forEach(pp => pp.style.display = 'none');
-      tab.classList.add('active');
-      tab.style.borderBottomColor = 'var(--accent-indigo)';
-      tab.style.color = 'var(--text-primary)';
-      container.querySelector(`#panel-${tab.dataset.tab}`).style.display = 'block';
-    };
-  });
-
-  // ===== HELPERS =====
-  function getConn() {
-    return {
-      host: container.querySelector('#pa-host').value.trim(),
-      version: container.querySelector('#pa-version').value.trim(),
-      key: container.querySelector('#pa-key').value.trim(),
+  const copyBtn = container.querySelector('#btn-copy-response');
+  if (copyBtn) {
+    copyBtn.onclick = () => {
+      const text = container.querySelector('#response-text').textContent;
+      navigator.clipboard.writeText(text).then(() => toast('Copied!', 'success'));
     };
   }
+}
 
-  function splitField(id) {
-    const val = container.querySelector(id).value.trim();
-    if (!val) return ['any'];
-    return val.split(',').map(s => s.trim()).filter(Boolean);
-  }
-
-  function getRuleBody() {
-    const name = container.querySelector('#rule-name').value.trim();
-    return {
-      entry: [{
-        '@name': name,
-        from: { member: splitField('#rule-from') },
-        to: { member: splitField('#rule-to') },
-        source: { member: splitField('#rule-source') },
-        destination: { member: splitField('#rule-dest') },
-        service: { member: splitField('#rule-service') },
-        application: { member: splitField('#rule-app') },
-        action: container.querySelector('#rule-action').value,
-        'log-start': container.querySelector('#rule-log-start').checked ? 'yes' : 'no',
-        'log-end': container.querySelector('#rule-log-end').checked ? 'yes' : 'no',
-        tag: { member: splitField('#rule-tags') },
-      }],
-    };
-  }
-
-  function getPostRuleBody() {
-    const body = getRuleBody();
-    return { entry: body.entry[0] };
-  }
-
-  function validate(fields) {
-    const missing = [];
-    for (const [label, val] of fields) {
-      if (!val) missing.push(label);
-    }
-    if (missing.length) { toast(`Missing: ${missing.join(', ')}`, 'error'); return false; }
-    return true;
-  }
-
-  function showResponse(text, success) {
-    const card = container.querySelector('#response-card');
-    card.style.display = 'block';
-    container.querySelector('#response-text').textContent = text;
-    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    toast(success ? 'Request successful!' : 'Request failed — see response', success ? 'success' : 'error');
-  }
-
-  function escHtml(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
-
-  function previewBlock(targetId, sections) {
-    const el = container.querySelector(targetId);
-    el.style.display = 'block';
-    el.innerHTML = sections.map(s => `
-      <div style="margin-bottom:12px;">
-        <label style="font-weight:600;color:var(--text-secondary);font-size:0.82rem;text-transform:uppercase;letter-spacing:0.04em;">${s.label}</label>
-        <div class="rule-preview" style="font-size:0.82rem;word-break:break-all;margin-top:4px;white-space:pre-wrap;max-height:300px;overflow-y:auto;">${escHtml(s.text)}</div>
-      </div>
-    `).join('');
-  }
-
-  container.querySelector('#btn-copy-response').onclick = () => {
-    navigator.clipboard.writeText(container.querySelector('#response-text').textContent).then(() => toast('Copied!', 'success'));
+function getRuleConfig(p, mode) {
+  const entry = {
+    '@name': p.ruleName,
+    from: { member: (p.ruleFrom || 'any').split(',').map(s => s.trim()).filter(Boolean) },
+    to: { member: (p.ruleTo || 'any').split(',').map(s => s.trim()).filter(Boolean) },
+    source: { member: (p.ruleSource || 'any').split(',').map(s => s.trim()).filter(Boolean) },
+    destination: { member: (p.ruleDest || 'any').split(',').map(s => s.trim()).filter(Boolean) },
+    application: { member: (p.ruleApp || 'any').split(',').map(s => s.trim()).filter(Boolean) },
+    service: { member: (p.ruleService || 'any').split(',').map(s => s.trim()).filter(Boolean) },
+    action: 'allow'
   };
-
-  // Helper to set field + persist
-  function setField(id, value) {
-    const el = container.querySelector(id);
-    el.value = value;
-    if (el.dataset.key) p[el.dataset.key] = value;
+  if (p.urlGroupName) entry.category = { member: [p.urlGroupName] };
+  if (mode === 'panorama' && p.panTarget) {
+    entry.target = { devices: { entry: p.panTarget.split(',').map(s => ({ '@name': s.trim() })) } };
   }
+  return { entry: [entry] };
+}
 
-  // ===== GENERATE API KEY =====
-  container.querySelector('#btn-keygen').onclick = async () => {
-    const host = container.querySelector('#keygen-host').value.trim();
-    const user = container.querySelector('#keygen-user').value.trim();
-    const pass = container.querySelector('#keygen-pass').value.trim();
-    if (!validate([['Host', host], ['Username', user], ['Password', pass]])) return;
+async function pushCategory(container, p, device) {
+  const status = container.querySelector('#push-cat-status');
+  status.textContent = 'Pushing...';
 
-    container.querySelector('#keygen-status').textContent = 'Generating...';
-    container.querySelector('#keygen-status').style.color = 'var(--text-muted)';
-    try {
-      const result = await api('/api/panos/proxy', {
-        method: 'POST', body: {
-          http_method: 'GET',
-          url: `https://${host}/api/`,
-          params: { type: 'keygen', user, password: pass },
-          headers: {},
-          json_body: null,
-        }
-      });
+  const urls = state.selectedUrls || [];
+  const body = { entry: { '@name': p.urlGroupName, list: { member: urls }, type: 'URL List', description: `IoT URLs - ${device.name}` } };
 
-      if (result.body) {
-        const match = result.body.match(/<key>(.*?)<\/key>/);
-        if (match) {
-          const key = match[1];
-          container.querySelector('#keygen-result').style.display = 'block';
-          container.querySelector('#keygen-key-output').value = key;
-          container.querySelector('#keygen-status').textContent = '✓ Key generated!';
-          container.querySelector('#keygen-status').style.color = 'var(--accent-green)';
-          if (!container.querySelector('#pa-host').value) setField('#pa-host', host);
-        } else {
-          container.querySelector('#keygen-status').textContent = '✗ Could not parse key from response';
-          container.querySelector('#keygen-status').style.color = 'var(--accent-red)';
-          showResponse(result.body, false);
-        }
-      } else {
-        container.querySelector('#keygen-status').textContent = '✗ No response';
-        container.querySelector('#keygen-status').style.color = 'var(--accent-red)';
+  let location = 'vsys', locVal = p.fwVsys, locKey = 'vsys';
+  if (p.panDg) { location = 'device-group'; locVal = p.panDg; locKey = 'device-group'; }
+
+  try {
+    const res = await api('/api/panos/proxy', {
+      method: 'POST', body: {
+        http_method: 'POST',
+        url: `https://${p.host}/restapi/v${p.version}/Objects/CustomURLCategories`,
+        params: { name: p.urlGroupName, location, [locKey]: locVal },
+        headers: { 'X-PAN-KEY': p.key, 'Content-Type': 'application/json' },
+        json_body: body
       }
-    } catch (err) {
-      container.querySelector('#keygen-status').textContent = `✗ ${err.message}`;
-      container.querySelector('#keygen-status').style.color = 'var(--accent-red)';
-    }
-  };
+    });
+    showResponse(container, res.body, res.success);
+    status.textContent = res.success ? 'Success' : 'Failed';
+  } catch (e) { status.textContent = 'Error'; toast(e.message, 'error'); }
+}
 
-  container.querySelector('#btn-keygen-copy').onclick = () => {
-    navigator.clipboard.writeText(container.querySelector('#keygen-key-output').value).then(() => toast('Key copied!', 'success'));
-  };
+async function pushRule(container, p, mode) {
+  const body = getRuleConfig(p, mode);
+  let url, params;
+  if (mode === 'panorama') {
+    url = `https://${p.host}/restapi/v${p.version}/Policies/SecurityPostRules`;
+    params = { name: p.ruleName, location: 'device-group', 'device-group': p.panDg };
+  } else {
+    url = `https://${p.host}/restapi/v${p.version}/Policies/SecurityRules`;
+    params = { name: p.ruleName, location: 'vsys', vsys: p.fwVsys };
+  }
 
-  container.querySelector('#btn-keygen-use').onclick = () => {
-    const key = container.querySelector('#keygen-key-output').value;
-    setField('#pa-key', key);
-    toast('API key applied to connection settings', 'success');
-  };
-
-  // ===== LOAD FROM ALLOWED FLOWS =====
-  container.querySelector('#btn-load-from-flows').onclick = async () => {
-    try {
-      const result = await api(`/api/devices/${device.id}/panos/rules-from-flows`, { method: 'POST', body: {} });
-      if (result.entry) {
-        const e = result.entry;
-        setField('#rule-name', e['@name'] || '');
-        setField('#rule-source', (e.source?.member || []).join(', '));
-        setField('#rule-dest', (e.destination?.member || []).join(', '));
-        setField('#rule-service', (e.service?.member || []).join(', '));
-        setField('#rule-app', (e.application?.member || []).join(', '));
-        setField('#rule-tags', (e.tag?.member || []).join(', '));
-        const stats = result.stats || {};
-        toast(`Loaded: ${stats.allowed_flows || 0} flows → ${stats.unique_destinations || 0} destinations, ${stats.unique_services || 0} services`, 'success');
+  try {
+    const res = await api('/api/panos/proxy', {
+      method: 'POST', body: {
+        http_method: 'POST', url, params,
+        headers: { 'X-PAN-KEY': p.key, 'Content-Type': 'application/json' },
+        json_body: body
       }
-    } catch (err) { toast(err.message, 'error'); }
-  };
+    });
+    showResponse(container, res.body, res.success);
+  } catch (e) { toast(e.message, 'error'); }
+}
 
-  // ========================================
-  //  FIREWALL TAB
-  // ========================================
-  container.querySelector('#btn-fw-preview').onclick = () => {
-    const c = getConn();
-    const vsys = container.querySelector('#fw-vsys').value.trim();
-    const name = container.querySelector('#rule-name').value.trim();
-    if (!validate([['Host', c.host], ['Version', c.version], ['API Key', c.key], ['VSYS', vsys], ['Rule Name', name]])) return;
+function showPreview(container, sections) {
+  const card = container.querySelector('#preview-card');
+  const body = container.querySelector('#preview-body');
+  const close = container.querySelector('#btn-close-preview');
 
-    const url = `https://${c.host}/restapi/v${c.version}/Policies/SecurityRules?name=${encodeURIComponent(name)}&location=vsys&vsys=${encodeURIComponent(vsys)}`;
-    const headers = `X-PAN-KEY: ${c.key}\nContent-Type: application/json\nAccept: application/json`;
-    const body = JSON.stringify(getRuleBody(), null, 2);
-    previewBlock('#fw-preview', [
-      { label: 'POST URL', text: url },
-      { label: 'Headers', text: headers },
-      { label: 'Body', text: body },
-    ]);
-  };
+  card.style.display = 'block';
+  body.innerHTML = sections.map(s => `
+    <div style="margin-bottom:12px;">
+      <label style="font-weight:600;font-size:0.75rem;text-transform:uppercase;color:var(--text-muted);">${s.label}</label>
+      <div class="rule-preview" style="padding:8px;margin-top:4px;font-size:0.8rem;">${s.text}</div>
+    </div>
+  `).join('');
 
-  container.querySelector('#btn-fw-push').onclick = async () => {
-    const c = getConn();
-    const vsys = container.querySelector('#fw-vsys').value.trim();
-    const name = container.querySelector('#rule-name').value.trim();
-    if (!validate([['Host', c.host], ['Version', c.version], ['API Key', c.key], ['VSYS', vsys], ['Rule Name', name]])) return;
+  close.onclick = () => card.style.display = 'none';
+  card.scrollIntoView({ behavior: 'smooth' });
+}
 
-    try {
-      const result = await api('/api/panos/proxy', {
-        method: 'POST', body: {
-          http_method: 'POST',
-          url: `https://${c.host}/restapi/v${c.version}/Policies/SecurityRules`,
-          params: { name, location: 'vsys', vsys },
-          headers: { 'X-PAN-KEY': c.key, 'Content-Type': 'application/json', Accept: 'application/json' },
-          json_body: getRuleBody(),
-        }
-      });
-      showResponse(result.body, result.success);
-    } catch (err) { toast(err.message, 'error'); }
-  };
-
-  container.querySelector('#btn-fw-commit').onclick = async () => {
-    const c = getConn();
-    const vsys = container.querySelector('#fw-vsys').value.trim();
-    if (!validate([['Host', c.host], ['Version', c.version], ['API Key', c.key]])) return;
-
-    const commitBody = {
-      entry: {
-        partial: vsys ? {
-          vsys: { member: [vsys] },
-          'device-and-network': 'excluded',
-          'shared-object': 'excluded',
-        } : {},
-      },
-    };
-
-    try {
-      const result = await api('/api/panos/proxy', {
-        method: 'POST', body: {
-          http_method: 'POST',
-          url: `https://${c.host}/restapi/v${c.version}/System/Configuration:commit`,
-          params: {},
-          headers: { 'X-PAN-KEY': c.key, 'Content-Type': 'application/json', Accept: 'application/json' },
-          json_body: commitBody,
-        }
-      });
-      showResponse(result.body, result.success);
-    } catch (err) { toast(err.message, 'error'); }
-  };
-
-  // ========================================
-  //  PANORAMA TAB
-  // ========================================
-  container.querySelector('#btn-pan-preview').onclick = () => {
-    const c = getConn();
-    const dg = container.querySelector('#pan-dg').value.trim();
-    const name = container.querySelector('#rule-name').value.trim();
-    if (!validate([['Host', c.host], ['Version', c.version], ['API Key', c.key], ['Device Group', dg], ['Rule Name', name]])) return;
-
-    const url = `https://${c.host}/restapi/v${c.version}/Policies/SecurityPostRules?name=${encodeURIComponent(name)}&location=device-group&device-group=${encodeURIComponent(dg)}`;
-    const headers = `X-PAN-KEY: ${c.key}\nContent-Type: application/json\nAccept: application/json`;
-    const body = JSON.stringify(getPostRuleBody(), null, 2);
-    previewBlock('#pan-preview', [
-      { label: 'Step 1 — POST Post-Rule', text: url },
-      { label: 'Headers', text: headers },
-      { label: 'Body', text: body },
-      { label: 'Step 2 — Commit to Panorama', text: `POST https://${c.host}/restapi/v${c.version}/System/Configuration:commit` },
-      { label: 'Step 3 — Push to Device Group', text: `POST https://${c.host}/restapi/v${c.version}/Panorama/ScheduledConfigPushProfiles?name=${encodeURIComponent(name + '-push')}` },
-    ]);
-  };
-
-  container.querySelector('#btn-pan-push').onclick = async () => {
-    const c = getConn();
-    const dg = container.querySelector('#pan-dg').value.trim();
-    const name = container.querySelector('#rule-name').value.trim();
-    if (!validate([['Host', c.host], ['Version', c.version], ['API Key', c.key], ['Device Group', dg], ['Rule Name', name]])) return;
-
-    try {
-      const result = await api('/api/panos/proxy', {
-        method: 'POST', body: {
-          http_method: 'POST',
-          url: `https://${c.host}/restapi/v${c.version}/Policies/SecurityPostRules`,
-          params: { name, location: 'device-group', 'device-group': dg },
-          headers: { 'X-PAN-KEY': c.key, 'Content-Type': 'application/json', Accept: 'application/json' },
-          json_body: getPostRuleBody(),
-        }
-      });
-      showResponse(result.body, result.success);
-    } catch (err) { toast(err.message, 'error'); }
-  };
-
-  container.querySelector('#btn-pan-commit').onclick = async () => {
-    const c = getConn();
-    const panVsys = container.querySelector('#pan-vsys').value.trim();
-    if (!validate([['Host', c.host], ['Version', c.version], ['API Key', c.key]])) return;
-
-    const commitBody = {
-      entry: {
-        partial: panVsys ? {
-          vsys: { member: [panVsys] },
-          'device-and-network': 'excluded',
-          'shared-object': 'excluded',
-        } : {},
-      },
-    };
-
-    try {
-      const result = await api('/api/panos/proxy', {
-        method: 'POST', body: {
-          http_method: 'POST',
-          url: `https://${c.host}/restapi/v${c.version}/System/Configuration:commit`,
-          params: {},
-          headers: { 'X-PAN-KEY': c.key, 'Content-Type': 'application/json', Accept: 'application/json' },
-          json_body: commitBody,
-        }
-      });
-      showResponse(result.body, result.success);
-    } catch (err) { toast(err.message, 'error'); }
-  };
-
-  container.querySelector('#btn-pan-push-dg').onclick = async () => {
-    const c = getConn();
-    const dg = container.querySelector('#pan-dg').value.trim();
-    const name = container.querySelector('#rule-name').value.trim();
-    if (!validate([['Host', c.host], ['Version', c.version], ['API Key', c.key], ['Device Group', dg]])) return;
-
-    const pushBody = {
-      entry: {
-        '@name': (name || 'iot') + '-push',
-        'one-time': {
-          'shared-policy-push': {
-            'device-group': { member: [dg] },
-            'merge-with-candidate-cfg': 'yes',
-            'include-template': 'no',
-          },
-        },
-      },
-    };
-
-    try {
-      const result = await api('/api/panos/proxy', {
-        method: 'POST', body: {
-          http_method: 'POST',
-          url: `https://${c.host}/restapi/v${c.version}/Panorama/ScheduledConfigPushProfiles`,
-          params: { name: (name || 'iot') + '-push' },
-          headers: { 'X-PAN-KEY': c.key, 'Content-Type': 'application/json', Accept: 'application/json' },
-          json_body: pushBody,
-        }
-      });
-      showResponse(result.body, result.success);
-    } catch (err) { toast(err.message, 'error'); }
-  };
+function showResponse(container, text, success) {
+  const card = container.querySelector('#response-card');
+  card.style.display = 'block';
+  container.querySelector('#response-text').textContent = typeof text === 'string' ? text : JSON.stringify(text, null, 2);
+  card.scrollIntoView({ behavior: 'smooth' });
 }

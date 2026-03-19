@@ -27,11 +27,20 @@ async def init_tables(db: aiosqlite.Connection):
         CREATE TABLE IF NOT EXISTS devices (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
+            iot_group TEXT DEFAULT '',
+            requester TEXT DEFAULT '',
+            homologation_number TEXT DEFAULT '',
             device_type TEXT DEFAULT '',
             vendor TEXT DEFAULT '',
             mac_address TEXT DEFAULT '',
             ip_address TEXT DEFAULT '',
             description TEXT DEFAULT '',
+            fan TEXT DEFAULT '',
+            model TEXT DEFAULT '',
+            hostname TEXT DEFAULT '',
+            site TEXT DEFAULT '',
+            family TEXT DEFAULT '',
+            serial_number TEXT DEFAULT '',
             status TEXT DEFAULT 'new',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
@@ -84,3 +93,32 @@ async def init_tables(db: aiosqlite.Connection):
         );
     """)
     await db.commit()
+
+    # Apply schema migrations for new fields safely
+    try:
+        await db.execute("ALTER TABLE devices ADD COLUMN fan TEXT DEFAULT ''")
+        await db.execute("ALTER TABLE devices ADD COLUMN model TEXT DEFAULT ''")
+        await db.execute("ALTER TABLE devices ADD COLUMN hostname TEXT DEFAULT ''")
+        await db.execute("ALTER TABLE devices ADD COLUMN site TEXT DEFAULT ''")
+        await db.execute("ALTER TABLE devices ADD COLUMN family TEXT DEFAULT ''")
+        await db.execute("ALTER TABLE devices ADD COLUMN serial_number TEXT DEFAULT ''")
+        await db.commit()
+    except Exception:
+        pass  # Columns already exist or other error
+
+    # Migration for new required fields
+    try:
+        await db.execute("ALTER TABLE devices ADD COLUMN iot_group TEXT DEFAULT ''")
+        await db.commit()
+    except Exception:
+        pass
+    try:
+        await db.execute("ALTER TABLE devices ADD COLUMN requester TEXT DEFAULT ''")
+        await db.commit()
+    except Exception:
+        pass
+    try:
+        await db.execute("ALTER TABLE devices ADD COLUMN homologation_number TEXT DEFAULT ''")
+        await db.commit()
+    except Exception:
+        pass

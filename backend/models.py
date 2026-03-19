@@ -6,31 +6,58 @@ from typing import Optional
 
 class DeviceCreate(BaseModel):
     name: str
+    iot_group: str
+    requester: str
+    homologation_number: str
     device_type: str = ""
     vendor: str = ""
     mac_address: str = ""
     ip_address: str = ""
     description: str = ""
+    fan: str = ""
+    model: str = ""
+    hostname: str = ""
+    site: str = ""
+    family: str = ""
+    serial_number: str = ""
 
 
 class DeviceUpdate(BaseModel):
     name: Optional[str] = None
+    iot_group: Optional[str] = None
+    requester: Optional[str] = None
+    homologation_number: Optional[str] = None
     device_type: Optional[str] = None
     vendor: Optional[str] = None
     mac_address: Optional[str] = None
     ip_address: Optional[str] = None
     description: Optional[str] = None
+    fan: Optional[str] = None
+    model: Optional[str] = None
+    hostname: Optional[str] = None
+    site: Optional[str] = None
+    family: Optional[str] = None
+    serial_number: Optional[str] = None
     status: Optional[str] = None
 
 
 class DeviceOut(BaseModel):
     id: str
     name: str
+    iot_group: str
+    requester: str
+    homologation_number: str
     device_type: str
     vendor: str
     mac_address: str
     ip_address: str
     description: str
+    fan: str
+    model: str
+    hostname: str
+    site: str
+    family: str
+    serial_number: str
     status: str
     created_at: str
     updated_at: str

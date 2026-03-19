@@ -7,13 +7,15 @@ from services.zeek_service import (
     get_ssl_connections, get_http_requests, get_ot_logs,
     get_protocol_summary,
 )
+from services.flow_service import extract_flows
+from services.flow_persist import merge_flows_into_db
 
 router = APIRouter(prefix="/api", tags=["analysis"])
 
 
 @router.post("/devices/{device_id}/captures/{capture_id}/analyze")
 async def analyze_capture(device_id: str, capture_id: str):
-    """Run Zeek analysis on a captured pcap file."""
+    """Run Zeek analysis on a captured pcap file and auto-extract flows."""
     db = await get_db()
     cursor = await db.execute("SELECT * FROM captures WHERE id = ?", (capture_id,))
     capture = await cursor.fetchone()
@@ -28,6 +30,13 @@ async def analyze_capture(device_id: str, capture_id: str):
     if not result.get("success"):
         raise HTTPException(500, f"Zeek analysis failed: {result.get('error', 'Unknown error')}")
 
+    # Auto-extract flows from Zeek logs and merge into DB
+    cursor = await db.execute("SELECT * FROM devices WHERE id = ?", (device_id,))
+    device = await cursor.fetchone()
+    device_ip = dict(device).get("ip_address", "") if device else ""
+    flows = extract_flows(output_dir, device_ip)
+    flow_stats = await merge_flows_into_db(db=db, device_id=device_id, capture_id=capture_id, flows=flows)
+
     now = datetime.now(timezone.utc).isoformat()
     await db.execute(
         "UPDATE devices SET status = 'analyzed', updated_at = ? WHERE id = ?",
@@ -35,7 +44,7 @@ async def analyze_capture(device_id: str, capture_id: str):
     )
     await db.commit()
 
-    return result
+    return {**result, "flow_extraction": flow_stats}
 
 
 @router.get("/devices/{device_id}/captures/{capture_id}/summary")
