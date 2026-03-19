@@ -501,6 +501,25 @@ async function pushRule(p, mode) {
       }
     });
     showResponse(res.body, res.success);
+
+    // If successful, move the rule above DENY-ANY-ANY
+    const bodyObj = typeof res.body === 'string' ? JSON.parse(res.body) : res.body;
+    if (res.success && (bodyObj['@status'] === 'success' || bodyObj.status === 'success')) {
+      toast('Moving rule above DENY-ANY-ANY...', 'info');
+      const moveParams = { ...params, action: 'move', where: 'before', dst: 'DENY-ANY-ANY' };
+      try {
+        const moveRes = await api('/api/panos/proxy', {
+          method: 'POST', body: {
+            http_method: 'POST', url, params: moveParams,
+            headers: { 'X-PAN-KEY': p.key, 'Content-Type': 'application/json' }
+          }
+        });
+        const textField = document.getElementById('response-text');
+        if (textField) {
+          textField.textContent += '\n\n--- MOVE RESULT ---\n' + (typeof moveRes.body === 'string' ? moveRes.body : JSON.stringify(moveRes.body, null, 2));
+        }
+      } catch (e) { toast('Move failed: ' + e.message, 'warning'); }
+    }
   } catch (e) {
     toast(e.message, 'error');
     showResponse(e.message, false);
