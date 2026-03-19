@@ -393,7 +393,8 @@ function renderStep5(container, p, device) {
       { label: 'Method', text: 'POST' },
       { label: 'URL', text: `https://${p.host || '[HOST]'}/restapi/v${p.version || '[VER]'}/Policies/SecurityPostRules` },
       { label: 'Query Params', text: `name=${p.ruleName}\nlocation=device-group\ndevice-group=${p.panDg}` },
-      { label: 'Body', text: JSON.stringify(body, null, 2) }
+      { label: 'Body', text: JSON.stringify(body, null, 2) },
+      { label: 'Follow-up Move', text: `URL: .../SecurityPostRules:move\nParams: where=before, dst=DENY-ANY-ANY\n(Triggered automatically on success)` }
     ]);
   };
 
@@ -404,7 +405,8 @@ function renderStep5(container, p, device) {
       { label: 'Method', text: 'POST' },
       { label: 'URL', text: `https://${p.host || '[HOST]'}/restapi/v${p.version || '[VER]'}/Policies/SecurityRules` },
       { label: 'Query Params', text: `name=${p.ruleName}\nlocation=vsys\nvsys=${p.fwVsys}` },
-      { label: 'Body', text: JSON.stringify(body, null, 2) }
+      { label: 'Body', text: JSON.stringify(body, null, 2) },
+      { label: 'Follow-up Move', text: `URL: .../SecurityRules:move\nParams: where=before, dst=DENY-ANY-ANY\n(Triggered automatically on success)` }
     ]);
   };
 
@@ -506,11 +508,12 @@ async function pushRule(p, mode) {
     const bodyObj = typeof res.body === 'string' ? JSON.parse(res.body) : res.body;
     if (res.success && (bodyObj['@status'] === 'success' || bodyObj.status === 'success')) {
       toast('Moving rule above DENY-ANY-ANY...', 'info');
-      const moveParams = { ...params, action: 'move', where: 'before', dst: 'DENY-ANY-ANY' };
+      const moveUrl = url + ':move';
+      const moveParams = { ...params, where: 'before', dst: 'DENY-ANY-ANY' };
       try {
         const moveRes = await api('/api/panos/proxy', {
           method: 'POST', body: {
-            http_method: 'POST', url, params: moveParams,
+            http_method: 'POST', url: moveUrl, params: moveParams,
             headers: { 'X-PAN-KEY': p.key, 'Content-Type': 'application/json' }
           }
         });
