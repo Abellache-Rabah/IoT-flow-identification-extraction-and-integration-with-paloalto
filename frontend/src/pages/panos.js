@@ -81,6 +81,16 @@ function getStepSubtitle(n, deviceName) {
   return `${subs[n - 1]} for <strong>${deviceName}</strong>`;
 }
 
+/**
+ * Ensures state object is up-to-date with current values in the DOM fields.
+ * This handles cases where fields are auto-filled or edited but not yet blurred.
+ */
+function syncStateFromFields(container, p) {
+  container.querySelectorAll('.pa-persist').forEach(el => {
+    p[el.dataset.key] = el.value;
+  });
+}
+
 // ---- STEP 1: API Token ----
 function renderStep1(container, p) {
   container.innerHTML = `
@@ -117,10 +127,11 @@ function renderStep1(container, p) {
   `;
 
   container.querySelector('#btn-keygen-preview').onclick = () => {
-    const host = container.querySelector('#keygen-host').value.trim();
-    const user = container.querySelector('#keygen-user').value.trim();
-    const pass = container.querySelector('#keygen-pass').value.trim();
-    showPreview(container.closest('#app-main-content') || document, [
+    syncStateFromFields(container, p);
+    const host = p.keygenHost;
+    const user = p.keygenUser;
+    const pass = p.keygenPass;
+    showPreview([
       { label: 'Method', text: 'GET' },
       { label: 'URL', text: `https://${host || '[HOST]'}/api/` },
       { label: 'Parameters', text: `type=keygen\nuser=${user || '[USER]'}\npassword=${pass ? '********' : '[PASS]'}` }
@@ -128,9 +139,10 @@ function renderStep1(container, p) {
   };
 
   container.querySelector('#btn-keygen').onclick = async () => {
-    const host = container.querySelector('#keygen-host').value.trim();
-    const user = container.querySelector('#keygen-user').value.trim();
-    const pass = container.querySelector('#keygen-pass').value.trim();
+    syncStateFromFields(container, p);
+    const host = p.keygenHost;
+    const user = p.keygenUser;
+    const pass = p.keygenPass;
     if (!host || !user || !pass) { toast('Fill all fields', 'error'); return; }
 
     const status = container.querySelector('#keygen-status');
@@ -142,6 +154,7 @@ function renderStep1(container, p) {
           params: { type: 'keygen', user, password: pass }
         }
       });
+      showResponse(res.body, res.success);
       const match = (res.body || '').match(/<key>(.*?)<\/key>/);
       if (match) {
         container.querySelector('#keygen-result').style.display = 'block';
@@ -153,7 +166,11 @@ function renderStep1(container, p) {
         status.textContent = 'Parse Error';
         status.style.color = 'var(--accent-red)';
       }
-    } catch (e) { status.textContent = `Error: ${e.message}`; status.style.color = 'var(--accent-red)'; }
+    } catch (e) {
+      status.textContent = `Error: ${e.message}`;
+      status.style.color = 'var(--accent-red)';
+      showResponse(e.message, false);
+    }
   };
 
   container.querySelector('#btn-keygen-use').onclick = () => {
@@ -236,11 +253,12 @@ async function renderStep3(container, p, device) {
   `;
 
   container.querySelector('#btn-push-cat-preview').onclick = () => {
+    syncStateFromFields(container, p);
     const body = { entry: { '@name': p.urlGroupName, list: { member: urls }, type: 'URL List', description: `IoT URLs - ${device.name}` } };
     let location = 'vsys', locVal = p.fwVsys, locKey = 'vsys';
     if (p.panDg) { location = 'device-group'; locVal = p.panDg; locKey = 'device-group'; }
 
-    showPreview(container.closest('#app-main-content') || document, [
+    showPreview([
       { label: 'Method', text: 'POST' },
       { label: 'URL', text: `https://${p.host || '[HOST]'}/restapi/v${p.version || '[VER]'}/Objects/CustomURLCategories` },
       { label: 'Query Params', text: `name=${p.urlGroupName}\nlocation=${location}\n${locKey}=${locVal}` },
@@ -248,7 +266,10 @@ async function renderStep3(container, p, device) {
     ]);
   };
 
-  container.querySelector('#btn-push-cat').onclick = () => pushCategory(container, p, device);
+  container.querySelector('#btn-push-cat').onclick = () => {
+    syncStateFromFields(container, p);
+    pushCategory(p, device);
+  };
 }
 
 // ---- STEP 4: Rule Config ----
@@ -366,8 +387,9 @@ function renderStep5(container, p, device) {
   tFw.onclick = () => { tFw.classList.add('active'); tPan.classList.remove('active'); pFw.style.display = 'block'; pPan.style.display = 'none'; };
 
   container.querySelector('#btn-pan-preview').onclick = () => {
+    syncStateFromFields(container, p);
     const body = getRuleConfig(p, 'panorama');
-    showPreview(container.closest('#app-main-content') || document, [
+    showPreview([
       { label: 'Method', text: 'POST' },
       { label: 'URL', text: `https://${p.host || '[HOST]'}/restapi/v${p.version || '[VER]'}/Policies/SecurityPostRules` },
       { label: 'Query Params', text: `name=${p.ruleName}\nlocation=device-group\ndevice-group=${p.panDg}` },
@@ -376,8 +398,9 @@ function renderStep5(container, p, device) {
   };
 
   container.querySelector('#btn-fw-preview').onclick = () => {
+    syncStateFromFields(container, p);
     const body = getRuleConfig(p, 'firewall');
-    showPreview(container.closest('#app-main-content') || document, [
+    showPreview([
       { label: 'Method', text: 'POST' },
       { label: 'URL', text: `https://${p.host || '[HOST]'}/restapi/v${p.version || '[VER]'}/Policies/SecurityRules` },
       { label: 'Query Params', text: `name=${p.ruleName}\nlocation=vsys\nvsys=${p.fwVsys}` },
@@ -385,8 +408,14 @@ function renderStep5(container, p, device) {
     ]);
   };
 
-  container.querySelector('#btn-push-pan').onclick = () => pushRule(container, p, 'panorama');
-  container.querySelector('#btn-push-fw').onclick = () => pushRule(container, p, 'firewall');
+  container.querySelector('#btn-push-pan').onclick = () => {
+    syncStateFromFields(container, p);
+    pushRule(p, 'panorama');
+  };
+  container.querySelector('#btn-push-fw').onclick = () => {
+    syncStateFromFields(container, p);
+    pushRule(p, 'firewall');
+  };
 }
 
 // ---- HELPERS & LOGIC ----
@@ -396,10 +425,10 @@ function setupWizardLogic(container, p) {
     el.addEventListener('input', () => { p[el.dataset.key] = el.value; });
   });
 
-  const copyBtn = container.querySelector('#btn-copy-response');
+  const copyBtn = document.getElementById('btn-copy-response');
   if (copyBtn) {
     copyBtn.onclick = () => {
-      const text = container.querySelector('#response-text').textContent;
+      const text = document.getElementById('response-text').textContent;
       navigator.clipboard.writeText(text).then(() => toast('Copied!', 'success'));
     };
   }
@@ -423,9 +452,9 @@ function getRuleConfig(p, mode) {
   return { entry: [entry] };
 }
 
-async function pushCategory(container, p, device) {
-  const status = container.querySelector('#push-cat-status');
-  status.textContent = 'Pushing...';
+async function pushCategory(p, device) {
+  const status = document.getElementById('push-cat-status');
+  if (status) status.textContent = 'Pushing...';
 
   const urls = state.selectedUrls || [];
   const body = { entry: { '@name': p.urlGroupName, list: { member: urls }, type: 'URL List', description: `IoT URLs - ${device.name}` } };
@@ -443,12 +472,16 @@ async function pushCategory(container, p, device) {
         json_body: body
       }
     });
-    showResponse(container, res.body, res.success);
-    status.textContent = res.success ? 'Success' : 'Failed';
-  } catch (e) { status.textContent = 'Error'; toast(e.message, 'error'); }
+    showResponse(res.body, res.success);
+    if (status) status.textContent = res.success ? 'Success' : 'Failed';
+  } catch (e) {
+    if (status) status.textContent = 'Error';
+    toast(e.message, 'error');
+    showResponse(e.message, false);
+  }
 }
 
-async function pushRule(container, p, mode) {
+async function pushRule(p, mode) {
   const body = getRuleConfig(p, mode);
   let url, params;
   if (mode === 'panorama') {
@@ -467,14 +500,19 @@ async function pushRule(container, p, mode) {
         json_body: body
       }
     });
-    showResponse(container, res.body, res.success);
-  } catch (e) { toast(e.message, 'error'); }
+    showResponse(res.body, res.success);
+  } catch (e) {
+    toast(e.message, 'error');
+    showResponse(e.message, false);
+  }
 }
 
-function showPreview(container, sections) {
-  const card = container.querySelector('#preview-card');
-  const body = container.querySelector('#preview-body');
-  const close = container.querySelector('#btn-close-preview');
+function showPreview(sections) {
+  const card = document.getElementById('preview-card');
+  const body = document.getElementById('preview-body');
+  const close = document.getElementById('btn-close-preview');
+
+  if (!card || !body) return;
 
   card.style.display = 'block';
   body.innerHTML = sections.map(s => `
@@ -488,9 +526,12 @@ function showPreview(container, sections) {
   card.scrollIntoView({ behavior: 'smooth' });
 }
 
-function showResponse(container, text, success) {
-  const card = container.querySelector('#response-card');
+function showResponse(text, success) {
+  const card = document.getElementById('response-card');
+  const textField = document.getElementById('response-text');
+  if (!card || !textField) return;
+
   card.style.display = 'block';
-  container.querySelector('#response-text').textContent = typeof text === 'string' ? text : JSON.stringify(text, null, 2);
+  textField.textContent = typeof text === 'string' ? text : JSON.stringify(text, null, 2);
   card.scrollIntoView({ behavior: 'smooth' });
 }
